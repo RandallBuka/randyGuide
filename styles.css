@@ -375,52 +375,122 @@ body {
   font-weight: 600;
 }
 
-.rg-popup .title {
-  margin: 0 0 0.25rem;
-  font-family: var(--font-display);
-  font-size: 1.05rem;
-  line-height: 1.2;
-}
-
 .rg-popup .meta {
-  margin: 0 0 0.45rem;
+  margin: 0 0 0.4rem;
   color: var(--ink-soft);
-  font-size: 0.78rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
-.rg-popup .region {
-  margin: 0 0 0.35rem;
+.rg-popup .title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.rg-popup .subtitle {
+  margin: 0.2rem 0 0;
   color: var(--ink-soft);
-  font-size: 0.82rem;
+  font-size: 0.92rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.rg-popup .rg-block {
+  margin-top: 0.75rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--line);
+}
+
+.rg-popup .block-label {
+  margin: 0 0 0.4rem;
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.rg-popup .details {
+  background: color-mix(in srgb, var(--paper-2) 70%, white);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.65rem 0.7rem 0.7rem;
+  border-top: 1px solid var(--line);
+}
+
+.rg-popup .details .block-label {
+  margin-top: 0;
 }
 
 .rg-popup .address {
-  margin: 0 0 0.55rem;
-  color: var(--ink-soft);
+  margin: 0;
+  color: var(--ink);
   font-size: 0.88rem;
   line-height: 1.4;
 }
 
+.rg-popup .details-facts {
+  margin-top: 0.45rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.rg-popup .fact {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.rg-popup .fact-label {
+  color: var(--ink-soft);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.rg-popup .fact-value,
+.rg-popup .fact-value a {
+  color: var(--ink);
+  font-size: 0.86rem;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.rg-popup .fact-value a {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.rg-popup .details-hint {
+  margin: 0.5rem 0 0;
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
 .rg-popup .desc {
-  margin: 0 0 0.55rem;
+  margin: 0;
   white-space: pre-wrap;
   font-size: 0.9rem;
   line-height: 1.45;
-  max-height: 10rem;
+  max-height: 9rem;
   overflow: auto;
 }
 
 .rg-popup .maps-link {
-  margin: 0;
+  margin: 0.55rem 0 0;
   font-size: 0.82rem;
 }
 
 .rg-popup .maps-link a {
   color: var(--accent);
-  font-weight: 600;
+  font-weight: 700;
   text-decoration: none;
 }
 
@@ -436,6 +506,7 @@ body {
 
 .leaflet-popup-content {
   margin: 0.85rem 0.95rem;
+  min-width: 220px;
 }
 
 .marker-cluster-small,

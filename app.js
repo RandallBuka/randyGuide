@@ -191,17 +191,18 @@
     await Promise.all(state.data.icons.map((i) => getLeafletIcon(i.key)));
   }
 
-  function displayTitle(place) {
+  function venueSubtitle(place) {
     const desc = (place.d || "").trim();
     const name = (place.n || "").trim();
 
-    // Descriptions often look like: "-Okonomiyaki Shimizu [Bib Gourmand]"
+    // Descriptions often look like: "-Queen City Exchange [notes]"
     const bullet = desc.match(/^[+\-–—•]\s*([^\n\r]+)/);
     if (bullet) {
       let title = bullet[1].replace(/\s*\[.*?\]\s*/g, " ").trim();
       title = title.replace(/\s{2,}/g, " ").trim();
-      // Keep the venue name before trailing notes after commas when very long
-      if (title.length > 2) return title;
+      if (title.length > 2 && title.toLowerCase() !== name.toLowerCase()) {
+        return title;
+      }
     }
 
     if (desc) {
@@ -215,54 +216,84 @@
       }
     }
 
-    return name || "Untitled";
+    return "";
   }
 
   function notesText(place) {
     const desc = (place.d || "").trim();
     if (!desc) return "";
-    const title = displayTitle(place);
-    // If the whole description is basically the title, don't duplicate
-    const stripped = desc
-      .replace(/^[+\-–—•]\s*/, "")
-      .replace(/\s*\[.*?\]\s*/g, " ")
-      .trim();
-    if (stripped === title || desc === title) {
-      // Still keep bracket notes if present
-      const brackets = [...desc.matchAll(/\[(.*?)\]/g)].map((m) => m[1].trim()).filter(Boolean);
-      return brackets.length ? brackets.join(" · ") : "";
+    const venue = venueSubtitle(place);
+
+    // Keep bracket callouts from the first line even if we promote the venue name
+    const brackets = [...desc.matchAll(/\[(.*?)\]/g)]
+      .map((m) => m[1].trim())
+      .filter(Boolean);
+
+    let body = desc;
+    if (venue) {
+      // Strip the leading venue bullet line so Notes don't repeat the subtitle
+      body = body.replace(/^[+\-–—•]\s*[^\n\r]+/, "").trim();
+      // Also strip a plain first-line duplicate of the venue
+      const lines = body.split(/\n/);
+      if (
+        lines[0] &&
+        lines[0].replace(/\[.*?\]/g, "").trim().toLowerCase() ===
+          venue.toLowerCase()
+      ) {
+        body = lines.slice(1).join("\n").trim();
+      }
     }
-    return desc;
+
+    const extras = brackets.filter(
+      (b) => !venue || !venue.toLowerCase().includes(b.toLowerCase())
+    );
+    if (!body && extras.length) return extras.map((b) => `[${b}]`).join("\n");
+    if (body && extras.length) {
+      // Avoid duplicating brackets already present in body
+      const missing = extras.filter((b) => !body.includes(b));
+      return missing.length ? `${body}\n${missing.map((b) => `[${b}]`).join("\n")}` : body;
+    }
+    return body;
   }
 
-  function mapsUrl(place) {
+  function mapsCoordUrl(place) {
     return `https://www.google.com/maps?q=${place.lat},${place.lng}`;
   }
 
   function popupHtml(place) {
     const layer = layerMeta(place.layer)?.label || place.layer;
     const icon = iconMeta(place.icon)?.label || place.icon;
-    const title = displayTitle(place);
-    const region = (place.n || "").trim();
+    const heading = (place.n || "").trim() || "Untitled";
+    const subtitle = venueSubtitle(place);
     const notes = notesText(place);
-    const regionLine =
-      region && region.toLowerCase() !== title.toLowerCase()
-        ? `<p class="region">${escapeHtml(region)}</p>`
-        : "";
+
+    const subtitleBlock = subtitle
+      ? `<p class="subtitle">${escapeHtml(subtitle)}</p>`
+      : "";
     const notesBlock = notes
-      ? `<p class="desc">${escapeHtml(notes)}</p>`
+      ? `<section class="rg-block notes">
+           <h4 class="block-label">Notes</h4>
+           <p class="desc">${escapeHtml(notes)}</p>
+         </section>`
       : "";
 
     return `
-      <div class="rg-popup" data-lat="${place.lat}" data-lng="${place.lng}">
+      <div class="rg-popup" data-lat="${place.lat}" data-lng="${place.lng}" data-heading="${escapeHtml(heading)}" data-venue="${escapeHtml(subtitle)}">
         <p class="meta">${escapeHtml(layer)} · ${escapeHtml(icon)}</p>
-        <h3 class="title">${escapeHtml(title)}</h3>
-        ${regionLine}
-        <p class="address">Looking up address…</p>
+        <h3 class="title">${escapeHtml(heading)}</h3>
+        ${subtitleBlock}
+
         ${notesBlock}
-        <p class="maps-link">
-          <a href="${mapsUrl(place)}" target="_blank" rel="noopener noreferrer">Open in Google Maps</a>
-        </p>
+
+        <section class="rg-block details">
+          <h4 class="block-label">Details</h4>
+          <p class="address js-address">Looking up address…</p>
+          <div class="details-facts js-facts" hidden></div>
+          <p class="details-hint">Phone, website, hours, and reviews open in Google Maps.</p>
+          <p class="maps-link">
+            <a class="js-maps-link" href="${mapsCoordUrl(place)}" target="_blank" rel="noopener noreferrer">Open in Google Maps</a>
+          </p>
+        </section>
       </div>
     `;
   }
@@ -302,7 +333,6 @@
       .map((x) => x.name)
       .filter(Boolean);
 
-    // Prefer finer admin names (street/locality-ish) over continent/timezone "informative"
     const parts = [
       admin[0],
       data.locality,
@@ -321,69 +351,103 @@
     return uniq.join(", ");
   }
 
-  async function lookupAddress(lat, lng) {
+  function renderFact(label, value, href) {
+    if (!value) return "";
+    const content = href
+      ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(value)}</a>`
+      : escapeHtml(value);
+    return `<div class="fact"><span class="fact-label">${escapeHtml(label)}</span><span class="fact-value">${content}</span></div>`;
+  }
+
+  async function lookupPlaceDetails(lat, lng) {
     const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
     if (addressCache.has(key)) return addressCache.get(key);
 
-    // 1) Nominatim — usually includes street-level detail
+    let result = { address: "", phone: "", website: "", osmName: "" };
+
     try {
       const nomUrl =
         `https://nominatim.openstreetmap.org/reverse` +
-        `?format=jsonv2&lat=${lat}&lon=${lng}&addressdetails=1&zoom=18`;
-      const res = await fetch(nomUrl, {
-        headers: { Accept: "application/json" },
-      });
+        `?format=jsonv2&lat=${lat}&lon=${lng}&addressdetails=1&extratags=1&namedetails=1&zoom=18`;
+      const res = await fetch(nomUrl, { headers: { Accept: "application/json" } });
       if (res.ok) {
         const data = await res.json();
-        const line = formatNominatimAddress(data);
-        if (line) {
-          addressCache.set(key, line);
-          return line;
-        }
+        result.address = formatNominatimAddress(data);
+        result.osmName = data.name || data.namedetails?.name || "";
+        const tags = data.extratags || {};
+        result.phone = tags.phone || tags["contact:phone"] || "";
+        result.website = tags.website || tags["contact:website"] || tags.url || "";
       }
     } catch {
       // fall through
     }
 
-    // 2) BigDataCloud free client API — city/region fallback
-    try {
-      const bdcUrl =
-        `https://api.bigdatacloud.net/data/reverse-geocode-client` +
-        `?latitude=${lat}&longitude=${lng}&localityLanguage=en`;
-      const res = await fetch(bdcUrl);
-      if (res.ok) {
-        const data = await res.json();
-        const line = formatBigDataAddress(data);
-        if (line) {
-          addressCache.set(key, line);
-          return line;
+    if (!result.address) {
+      try {
+        const bdcUrl =
+          `https://api.bigdatacloud.net/data/reverse-geocode-client` +
+          `?latitude=${lat}&longitude=${lng}&localityLanguage=en`;
+        const res = await fetch(bdcUrl);
+        if (res.ok) {
+          const data = await res.json();
+          result.address = formatBigDataAddress(data);
         }
+      } catch {
+        // fall through
       }
-    } catch {
-      // fall through
     }
 
-    const fallback = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-    addressCache.set(key, fallback);
-    return fallback;
+    if (!result.address) {
+      result.address = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    }
+
+    addressCache.set(key, result);
+    return result;
   }
 
   async function fillAddress(popupRoot) {
-    const box = popupRoot?.querySelector?.(".address");
-    if (!box) return;
-    const wrap = popupRoot.closest(".rg-popup") || popupRoot;
+    const wrap = popupRoot?.closest?.(".rg-popup") || popupRoot;
+    if (!wrap) return;
+    const addressEl = wrap.querySelector(".js-address");
+    const factsEl = wrap.querySelector(".js-facts");
+    const mapsLink = wrap.querySelector(".js-maps-link");
     const lat = Number(wrap.getAttribute("data-lat"));
     const lng = Number(wrap.getAttribute("data-lng"));
+    const venue = wrap.getAttribute("data-venue") || "";
+    const heading = wrap.getAttribute("data-heading") || "";
+
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-      box.hidden = true;
+      if (addressEl) addressEl.hidden = true;
       return;
     }
 
-    box.hidden = false;
-    box.textContent = "Looking up address…";
-    const line = await lookupAddress(lat, lng);
-    // Popup may have been closed/reopened; only update if still current
-    if (box.isConnected) box.textContent = line;
+    if (addressEl) {
+      addressEl.hidden = false;
+      addressEl.textContent = "Looking up address…";
+    }
+
+    const details = await lookupPlaceDetails(lat, lng);
+    if (!wrap.isConnected) return;
+
+    if (addressEl) addressEl.textContent = details.address;
+
+    if (factsEl) {
+      const html = [
+        renderFact("Phone", details.phone, details.phone ? `tel:${details.phone}` : ""),
+        renderFact("Website", details.website ? details.website.replace(/^https?:\/\//, "") : "", details.website),
+      ]
+        .filter(Boolean)
+        .join("");
+      factsEl.innerHTML = html;
+      factsEl.hidden = !html;
+    }
+
+    if (mapsLink) {
+      const q = encodeURIComponent(
+        [venue, heading, details.address].filter(Boolean).join(" ")
+      );
+      mapsLink.href = `https://www.google.com/maps/search/?api=1&query=${q}`;
+    }
   }
 
   function bindPlacePopup(marker, place) {
