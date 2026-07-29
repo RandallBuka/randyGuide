@@ -35,9 +35,9 @@
     "red-pin": "#DB4436",
     "purple-flag": "#8E24AA",
     "yellow-eye": "#F9A825",
-    restaurant: "#EF6C00",
-    dollar: "#2E7D32",
-    cocktail: "#00838F",
+    restaurant: "#F9A825",
+    dollar: "#F9A825",
+    cocktail: "#F9A825",
     other: "#607D8B",
     "route-pin": "#DB4436",
   };
