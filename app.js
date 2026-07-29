@@ -24,6 +24,8 @@
     query: "",
     map: null,
     layer: null,
+    canvasRenderer: null,
+    markerMode: null, // "canvas" | "icon"
     markersByKey: new Map(),
     searchMarker: null,
     contentHash: null,
@@ -50,7 +52,6 @@
   const preparedIconUrls = new Map();
   const leafletIconCache = new Map();
   let didFitInitialView = false;
-  let renderSeq = 0;
 
   const els = {
     iconFilters: document.getElementById("icon-filters"),
@@ -562,6 +563,7 @@
     leafletIconCache.clear();
     preparedIconUrls.clear();
     clearAllMarkers();
+    state.markerMode = null;
     renderFilterList(els.iconFilters, data.icons, "icon");
     renderFilterList(els.layerFilters, data.layers, "layer");
     await ensureIconsReady();
@@ -569,10 +571,38 @@
     scheduleRender({ immediate: true });
   }
 
+  function preferCanvasMarkers(zoom, count) {
+    // DOM image pins get too heavy once thousands are on screen; canvas draws all of them.
+    return count > 450 || zoom < 8;
+  }
+
+  function canvasMarkerForPlace(place) {
+    const zoom = state.map.getZoom();
+    const radius = zoom < 4 ? 3 : zoom < 6 ? 4 : zoom < 9 ? 5 : 6;
+    return L.circleMarker([place.lat, place.lng], {
+      renderer: state.canvasRenderer,
+      radius,
+      color: "#ffffff",
+      weight: 1,
+      fillColor: ICON_COLORS[place.icon] || "#607D8B",
+      fillOpacity: 0.92,
+      opacity: 1,
+    });
+  }
+
+  async function iconMarkerForPlace(place) {
+    const icon = await getLeafletIcon(place.icon);
+    return L.marker([place.lat, place.lng], {
+      icon,
+      keyboard: false,
+      riseOnHover: true,
+    });
+  }
+
   async function renderVisibleMarkers() {
     if (!state.map || !state.layer || !state.data) return;
 
-    // Wait until the map settles, then always run a full pass
+    // Don't start a new pass mid-gesture; an in-flight pass is allowed to finish
     if (state.mapMoving) {
       state.renderPending = true;
       return;
@@ -584,12 +614,12 @@
 
     state.renderRunning = true;
     state.renderPending = false;
-    const seq = ++renderSeq;
 
     try {
       const matched = filteredPlaces();
+      const zoom = state.map.getZoom();
       // Slight pad so edge pins aren't clipped by the viewport
-      const bounds = state.map.getBounds().pad(0.2);
+      const bounds = state.map.getBounds().pad(0.25);
 
       const shouldShow = new Map();
       for (const place of matched) {
@@ -598,6 +628,14 @@
           shouldShow.set(placeKey(place), place);
         }
       }
+
+      const nextMode = preferCanvasMarkers(zoom, shouldShow.size)
+        ? "canvas"
+        : "icon";
+      if (state.markerMode && state.markerMode !== nextMode) {
+        clearAllMarkers();
+      }
+      state.markerMode = nextMode;
 
       // Drop markers that left the view / no longer match filters.
       // Never remove a marker with an open popup (auto-pan would otherwise close it).
@@ -608,48 +646,26 @@
         state.markersByKey.delete(key);
       }
 
-      if (seq !== renderSeq) {
-        state.renderPending = true;
-        return;
-      }
-
       const toAdd = [];
       for (const [key, place] of shouldShow) {
         if (!state.markersByKey.has(key)) toAdd.push([key, place]);
       }
 
-      // Ensure every icon style is ready (never skip a pin for a missing icon)
-      const iconKeys = [...new Set(toAdd.map(([, p]) => p.icon))];
-      await Promise.all(iconKeys.map((k) => getLeafletIcon(k)));
-      if (seq !== renderSeq) {
-        state.renderPending = true;
-        return;
-      }
-      if (state.mapMoving) {
-        state.renderPending = true;
-        return;
+      if (nextMode === "icon") {
+        const iconKeys = [...new Set(toAdd.map(([, p]) => p.icon))];
+        await Promise.all(iconKeys.map((k) => getLeafletIcon(k)));
       }
 
-      const CHUNK = 80;
+      // Finish this full pass even if the user starts panning — moveend will reconcile.
+      const CHUNK = nextMode === "canvas" ? 400 : 80;
       for (let i = 0; i < toAdd.length; i += CHUNK) {
-        if (seq !== renderSeq || state.mapMoving) {
-          state.renderPending = true;
-          return;
-        }
         const chunk = toAdd.slice(i, i + CHUNK);
         for (const [key, place] of chunk) {
           if (state.markersByKey.has(key)) continue;
-          let icon = leafletIconCache.get(place.icon);
-          if (!icon) icon = await getLeafletIcon(place.icon);
-          if (seq !== renderSeq || state.mapMoving) {
-            state.renderPending = true;
-            return;
-          }
-          const marker = L.marker([place.lat, place.lng], {
-            icon,
-            keyboard: false,
-            riseOnHover: true,
-          });
+          const marker =
+            nextMode === "canvas"
+              ? canvasMarkerForPlace(place)
+              : await iconMarkerForPlace(place);
           bindPlacePopup(marker, place);
           state.layer.addLayer(marker);
           state.markersByKey.set(key, marker);
@@ -657,11 +673,6 @@
         if (i + CHUNK < toAdd.length) {
           await new Promise((r) => requestAnimationFrame(r));
         }
-      }
-
-      if (seq !== renderSeq) {
-        state.renderPending = true;
-        return;
       }
 
       els.status.textContent = `${matched.length.toLocaleString()} of ${state.data.count.toLocaleString()} match filters · ${shouldShow.size.toLocaleString()} in view`;
@@ -1313,14 +1324,14 @@
     state.activeBase = "satellite";
     wireBasemapToggle();
 
+    state.canvasRenderer = L.canvas({ padding: 0.5 });
     state.layer = L.layerGroup().addTo(state.map);
 
-    // Pause marker work while the map is moving so overlays don't flicker;
-    // always finish a full in-view pass after the gesture ends.
+    // Don't cancel in-flight pin loads on pan/zoom — that left holes when zoomed out.
+    // Just defer starting a *new* pass until the gesture ends.
     const beginMapGesture = () => {
       state.mapMoving = true;
       clearTimeout(state.renderTimer);
-      renderSeq += 1; // abort any in-flight async marker pass
       state.renderPending = true;
     };
     const endMapGesture = () => {
