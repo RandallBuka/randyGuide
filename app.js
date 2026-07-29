@@ -328,14 +328,7 @@
       // Yield so the overlay can paint before the JSON parse blocks the main thread
       await new Promise((r) => setTimeout(r, 20));
       const data = JSON.parse(text);
-
-      preserveFiltersAgainst(data);
-      state.data = data;
-      state.places = data.places;
-
-      renderFilterList(els.iconFilters, data.icons, "icon");
-      renderFilterList(els.layerFilters, data.layers, "layer");
-      renderVisibleMarkers();
+      await applyPlacesData(data);
     } finally {
       setLoading(false);
     }
@@ -351,12 +344,12 @@
 
   function enableStaticHostingMode() {
     state.hasSyncApi = false;
-    if (els.syncNow) els.syncNow.hidden = true;
+    if (els.syncNow) els.syncNow.hidden = false;
     if (els.syncHint) {
       els.syncHint.textContent =
-        "Hosted online — place data refreshes automatically from Google My Maps via GitHub.";
+        "Sync now re-pulls the live Google My Map in this browser. GitHub also refreshes about every 6 hours.";
     }
-    els.syncStatus.textContent = "Online edition";
+    els.syncStatus.textContent = "Online edition — tap Sync now to refresh";
   }
 
   async function detectSyncApi() {
@@ -369,11 +362,38 @@
         return false;
       }
       state.hasSyncApi = true;
+      if (els.syncNow) els.syncNow.hidden = false;
+      if (els.syncHint) {
+        els.syncHint.textContent =
+          "Sync now re-pulls from Google My Maps. Auto-checks continue while this server is running.";
+      }
       return true;
     } catch {
       enableStaticHostingMode();
       return false;
     }
+  }
+
+  async function applyPlacesData(data) {
+    preserveFiltersAgainst(data);
+    state.data = data;
+    state.places = data.places;
+    renderFilterList(els.iconFilters, data.icons, "icon");
+    renderFilterList(els.layerFilters, data.layers, "layer");
+    renderVisibleMarkers();
+  }
+
+  async function syncFromGoogleInBrowser() {
+    if (!window.RandyGuideKml?.pullLiveMap) {
+      throw new Error("Live sync script failed to load");
+    }
+    els.syncStatus.textContent = "Downloading Google My Map…";
+    const data = await window.RandyGuideKml.pullLiveMap();
+    if (!data?.places?.length) {
+      throw new Error("My Map download contained no places");
+    }
+    await applyPlacesData(data);
+    els.syncStatus.textContent = `Synced just now · ${data.count.toLocaleString()} places`;
   }
 
   async function checkForUpdates() {
@@ -401,22 +421,27 @@
   }
 
   async function syncNow() {
-    if (state.loading || !state.hasSyncApi) return;
+    if (state.loading) return;
     els.syncNow.disabled = true;
     els.syncStatus.textContent = "Syncing from Google My Maps…";
     setLoading(true, "Syncing from My Maps…");
     try {
-      const res = await fetch(url("api/sync"), { method: "POST" });
-      const meta = await res.json();
-      if (!res.ok || meta.ok === false) {
-        throw new Error(meta.lastError || "Sync failed");
+      if (state.hasSyncApi) {
+        const res = await fetch(url("api/sync"), { method: "POST" });
+        const meta = await res.json();
+        if (!res.ok || meta.ok === false) {
+          throw new Error(meta.lastError || "Sync failed");
+        }
+        setLoading(false);
+        if (meta.changed || meta.contentHash !== state.contentHash) {
+          await loadPlaces();
+        }
+        state.contentHash = meta.contentHash || state.contentHash;
+        updateSyncStatus(meta);
+      } else {
+        await syncFromGoogleInBrowser();
+        setLoading(false);
       }
-      setLoading(false);
-      if (meta.changed || meta.contentHash !== state.contentHash) {
-        await loadPlaces();
-      }
-      state.contentHash = meta.contentHash || state.contentHash;
-      updateSyncStatus(meta);
     } catch (err) {
       console.error(err);
       els.syncStatus.textContent = `Sync failed: ${err.message || err}`;

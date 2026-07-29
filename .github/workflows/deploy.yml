@@ -33,7 +33,7 @@ jobs:
       - name: Stage static site
         run: |
           mkdir -p _site/data _site/icons/app _site/icons
-          cp index.html app.js styles.css sw.js manifest.webmanifest _site/
+          cp index.html app.js styles.css sw.js manifest.webmanifest kml-client.js _site/
           cp -r icons/app _site/icons/
           # Keep stock pin icons used by the sidebar swatches
           cp icons/*.png _site/icons/ 2>/dev/null || true
