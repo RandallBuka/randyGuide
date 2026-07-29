@@ -24,6 +24,7 @@
     query: "",
     map: null,
     layer: null,
+    markersByKey: new Map(),
     contentHash: null,
     pollTimer: null,
     renderTimer: null,
@@ -42,10 +43,10 @@
     "route-pin": "#DB4436",
   };
 
-  const MAX_VISIBLE_MARKERS = 1200;
   const preparedIconUrls = new Map();
   const leafletIconCache = new Map();
   let didFitInitialView = false;
+  let renderSeq = 0;
 
   const els = {
     iconFilters: document.getElementById("icon-filters"),
@@ -451,12 +452,22 @@
   }
 
   function bindPlacePopup(marker, place) {
-    marker.bindPopup(() => popupHtml(place), { maxWidth: 300 });
+    marker.bindPopup(() => popupHtml(place), {
+      maxWidth: 300,
+      autoPan: true,
+      autoPanPadding: [40, 40],
+      // Keep popup alive if map nudges while opening
+      closeOnClick: true,
+    });
     marker.on("popupopen", (e) => {
       const node = e.popup.getElement();
       const root = node?.querySelector(".rg-popup");
       if (root) fillAddress(root);
     });
+  }
+
+  function placeKey(place) {
+    return `${place.icon}|${place.layer}|${place.lat}|${place.lng}|${place.n}|${place.d || ""}`;
   }
 
   function matchesFilters(place, q) {
@@ -475,11 +486,22 @@
     return out;
   }
 
-  function scheduleRender() {
+  function clearAllMarkers() {
+    if (state.layer) state.layer.clearLayers();
+    state.markersByKey.clear();
+  }
+
+  function scheduleRender({ immediate = false } = {}) {
     clearTimeout(state.renderTimer);
-    state.renderTimer = setTimeout(() => {
+    const run = () => {
       renderVisibleMarkers().catch((err) => console.error(err));
-    }, 40);
+    };
+    if (immediate) {
+      run();
+      return;
+    }
+    // Short debounce keeps pans smooth without waiting long after release
+    state.renderTimer = setTimeout(run, 16);
   }
 
   function fitToDataIfNeeded() {
@@ -499,6 +521,7 @@
     state.places = data.places;
     leafletIconCache.clear();
     preparedIconUrls.clear();
+    clearAllMarkers();
     renderFilterList(els.iconFilters, data.icons, "icon");
     renderFilterList(els.layerFilters, data.layers, "layer");
     await ensureIconsReady();
@@ -509,36 +532,65 @@
   async function renderVisibleMarkers() {
     if (!state.map || !state.layer || !state.data) return;
 
+    const seq = ++renderSeq;
     const matched = filteredPlaces();
-    const bounds = state.map.getBounds().pad(0.15);
-    const visible = [];
+    // Generous pad so edge pins don't drop during small pans / popup auto-pan
+    const bounds = state.map.getBounds().pad(0.35);
 
+    const shouldShow = new Map();
     for (const place of matched) {
       if (bounds.contains([place.lat, place.lng])) {
-        visible.push(place);
-        if (visible.length >= MAX_VISIBLE_MARKERS) break;
+        shouldShow.set(placeKey(place), place);
       }
     }
 
-    state.layer.clearLayers();
-
-    for (const place of visible) {
-      const icon = await getLeafletIcon(place.icon);
-      const marker = L.marker([place.lat, place.lng], {
-        icon,
-        keyboard: false,
-        riseOnHover: true,
-      });
-      bindPlacePopup(marker, place);
-      state.layer.addLayer(marker);
+    // Drop markers that left the view / no longer match filters.
+    // Never remove a marker with an open popup (auto-pan would otherwise close it).
+    for (const [key, marker] of [...state.markersByKey.entries()]) {
+      if (shouldShow.has(key)) continue;
+      if (marker.isPopupOpen()) continue;
+      state.layer.removeLayer(marker);
+      state.markersByKey.delete(key);
     }
 
-    const hitCap = visible.length >= MAX_VISIBLE_MARKERS;
-    const viewNote = hitCap
-      ? ` · showing ${MAX_VISIBLE_MARKERS.toLocaleString()} in view (zoom in)`
-      : ` · ${visible.length.toLocaleString()} in view`;
+    if (seq !== renderSeq) return;
 
-    els.status.textContent = `${matched.length.toLocaleString()} of ${state.data.count.toLocaleString()} match filters${viewNote}`;
+    // Add only markers that are missing (keeps open popups intact)
+    const toAdd = [];
+    for (const [key, place] of shouldShow) {
+      if (!state.markersByKey.has(key)) toAdd.push([key, place]);
+    }
+
+    const iconKeys = [...new Set(toAdd.map(([, p]) => p.icon))];
+    await Promise.all(iconKeys.map((k) => getLeafletIcon(k)));
+    if (seq !== renderSeq) return;
+
+    // Sync adds after icons are ready — no per-marker await (faster, no mid-add gaps)
+    const CHUNK = 120;
+    for (let i = 0; i < toAdd.length; i += CHUNK) {
+      if (seq !== renderSeq) return;
+      const chunk = toAdd.slice(i, i + CHUNK);
+      for (const [key, place] of chunk) {
+        if (state.markersByKey.has(key)) continue;
+        const icon = leafletIconCache.get(place.icon);
+        if (!icon) continue;
+        const marker = L.marker([place.lat, place.lng], {
+          icon,
+          keyboard: false,
+          riseOnHover: true,
+        });
+        bindPlacePopup(marker, place);
+        state.layer.addLayer(marker);
+        state.markersByKey.set(key, marker);
+      }
+      if (i + CHUNK < toAdd.length) {
+        await new Promise((r) => requestAnimationFrame(r));
+      }
+    }
+
+    if (seq !== renderSeq) return;
+
+    els.status.textContent = `${matched.length.toLocaleString()} of ${state.data.count.toLocaleString()} match filters · ${shouldShow.size.toLocaleString()} in view`;
   }
 
   function renderFilterList(container, items, kind) {
@@ -560,7 +612,7 @@
         const set = kind === "icon" ? state.activeIcons : state.activeLayers;
         if (input.checked) set.add(item.key);
         else set.delete(item.key);
-        scheduleRender();
+        scheduleRender({ immediate: true });
       });
 
       const text = document.createElement("span");
@@ -604,7 +656,7 @@
       );
       renderFilterList(els.layerFilters, state.data.layers, "layer");
     }
-    scheduleRender();
+    scheduleRender({ immediate: true });
   }
 
   function preserveFiltersAgainst(nextData) {
@@ -810,7 +862,7 @@
       clearTimeout(searchTimer);
       searchTimer = setTimeout(() => {
         state.query = els.search.value;
-        scheduleRender();
+        scheduleRender({ immediate: true });
       }, 120);
     });
 
@@ -890,8 +942,18 @@
       .addTo(state.map);
 
     state.layer = L.layerGroup().addTo(state.map);
-    state.map.on("moveend", scheduleRender);
-    state.map.on("zoomend", scheduleRender);
+
+    // Update while dragging so pins appear without waiting for release
+    let moveRaf = 0;
+    state.map.on("move", () => {
+      if (moveRaf) return;
+      moveRaf = requestAnimationFrame(() => {
+        moveRaf = 0;
+        scheduleRender({ immediate: true });
+      });
+    });
+    state.map.on("moveend", () => scheduleRender({ immediate: true }));
+    state.map.on("zoomend", () => scheduleRender({ immediate: true }));
   }
 
   async function boot() {
