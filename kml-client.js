@@ -72,17 +72,19 @@ window.RandyGuideKml = (() => {
   }
 
   function nameFromBlock(xml) {
-    const cdata = xml.match(/<name><!\[CDATA\[([\s\S]*?)\]\]><\/name>/);
-    if (cdata) return cleanText(cdata[1]);
-    const plain = xml.match(/<name>([^<]*)<\/name>/);
-    return cleanText(plain ? plain[1] : "");
+    // Must take the first <name> in document order (CDATA or plain).
+    // Preferring CDATA first wrongly picks a placemark title as the folder/layer name.
+    const m = xml.match(/<name>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([^<]*))<\/name>/);
+    if (!m) return "";
+    return cleanText(m[1] || m[2] || "");
   }
 
   function descFromBlock(xml) {
-    const cdata = xml.match(/<description><!\[CDATA\[([\s\S]*?)\]\]><\/description>/);
-    if (cdata) return cleanText(cdata[1]);
-    const plain = xml.match(/<description>([^<]*)<\/description>/);
-    return cleanText(plain ? plain[1] : "");
+    const m = xml.match(
+      /<description>(?:<!\[CDATA\[([\s\S]*?)\]\]>|([^<]*))<\/description>/
+    );
+    if (!m) return "";
+    return cleanText(m[1] || m[2] || "");
   }
 
   function normalizeStyle(styleUrl) {
