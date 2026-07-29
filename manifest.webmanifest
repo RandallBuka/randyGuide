@@ -1,0 +1,32 @@
+{
+  "name": "Randy's Guide",
+  "short_name": "Randy's Guide",
+  "description": "Filterable travel map mirrored from Google My Maps.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#eef3f6",
+  "theme_color": "#0f6e56",
+  "lang": "en",
+  "icons": [
+    {
+      "src": "icons/app/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/app/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/app/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

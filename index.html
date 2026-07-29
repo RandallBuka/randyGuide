@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0f6e56" />
+    <meta name="color-scheme" content="light" />
+    <meta
+      name="description"
+      content="Randy's Guide — filterable travel map you can install on your phone."
+    />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Randy's Guide" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="icons/app/icon-180.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="icons/app/icon-192.png" />
+    <title>Randy's Guide</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Figtree:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="styles.css?v=7" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar" id="sidebar">
+        <header class="sidebar-header">
+          <p class="eyebrow">Travel map</p>
+          <h1>Randy's Guide</h1>
+          <p class="subtitle">
+            Filter by pin style or category. Same places as the Google My Map.
+          </p>
+        </header>
+
+        <div class="search-wrap">
+          <label class="sr-only" for="search">Search places</label>
+          <input
+            id="search"
+            type="search"
+            placeholder="Search places…"
+            autocomplete="off"
+          />
+        </div>
+
+        <section class="filter-section">
+          <div class="section-head">
+            <h2>Pin style</h2>
+            <div class="section-actions">
+              <button type="button" data-action="icons-all">All</button>
+              <button type="button" data-action="icons-none">None</button>
+            </div>
+          </div>
+          <div id="icon-filters" class="filter-list"></div>
+        </section>
+
+        <section class="filter-section">
+          <div class="section-head">
+            <h2>Category</h2>
+            <div class="section-actions">
+              <button type="button" data-action="layers-all">All</button>
+              <button type="button" data-action="layers-none">None</button>
+            </div>
+          </div>
+          <div id="layer-filters" class="filter-list"></div>
+        </section>
+
+        <footer class="sidebar-footer">
+          <p id="status">Loading map data…</p>
+          <div class="sync-row">
+            <p id="sync-status" class="sync-status">Checking for My Maps updates…</p>
+            <button type="button" id="sync-now" class="sync-btn">Sync now</button>
+          </div>
+          <p class="hint" id="sync-hint">
+            Auto-checks the Google My Map every few minutes while the server is running.
+          </p>
+        </footer>
+      </aside>
+
+      <button
+        type="button"
+        class="sidebar-toggle"
+        id="sidebar-toggle"
+        aria-expanded="false"
+        aria-controls="sidebar"
+      >
+        Filters
+      </button>
+
+      <main class="map-pane">
+        <div id="map" role="application" aria-label="Randy's Guide map"></div>
+        <div id="loading" class="loading" hidden>
+          <div class="spinner" aria-hidden="true"></div>
+          <span>Loading places…</span>
+        </div>
+      </main>
+    </div>
+
+    <div id="install-banner" class="install-banner" hidden>
+      <div class="install-copy">
+        <strong>Install Randy's Guide</strong>
+        <span id="install-instructions"
+          >Add it to your home screen for a full-screen app experience.</span
+        >
+      </div>
+      <div class="install-actions">
+        <button type="button" id="install-btn" class="install-primary" hidden>
+          Install
+        </button>
+        <button type="button" id="install-dismiss" class="install-dismiss">
+          Not now
+        </button>
+      </div>
+    </div>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="app.js?v=7"></script>
+  </body>
+</html>
