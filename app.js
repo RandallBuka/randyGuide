@@ -467,15 +467,53 @@
     state.renderTimer = setTimeout(run, 16);
   }
 
-  function fitToDataIfNeeded() {
+  function getDevicePosition() {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error("Geolocation unavailable"));
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: false,
+        timeout: 4500,
+        maximumAge: 5 * 60 * 1000,
+      });
+    });
+  }
+
+  function regionZoomForAccuracy(meters) {
+    if (!Number.isFinite(meters)) return 8;
+    if (meters > 80_000) return 6;
+    if (meters > 30_000) return 7;
+    if (meters < 5_000) return 9;
+    return 8;
+  }
+
+  async function fitInitialView() {
     if (didFitInitialView || !state.map || !state.places.length) return;
+    didFitInitialView = true;
+
+    try {
+      const pos = await getDevicePosition();
+      const { latitude, longitude, accuracy } = pos.coords;
+      if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+        state.map.setView(
+          [latitude, longitude],
+          regionZoomForAccuracy(accuracy),
+          { animate: false }
+        );
+        return;
+      }
+    } catch {
+      // Permission denied, timeout, or unavailable — fall back below
+    }
+
     const matched = filteredPlaces();
     if (!matched.length) return;
     const latLngs = matched.map((p) => [p.lat, p.lng]);
     const bounds = L.latLngBounds(latLngs);
     if (!bounds.isValid()) return;
     state.map.fitBounds(bounds.pad(0.08), { maxZoom: 5, animate: false });
-    didFitInitialView = true;
   }
 
   async function applyPlacesData(data) {
@@ -488,7 +526,7 @@
     renderFilterList(els.iconFilters, data.icons, "icon");
     renderFilterList(els.layerFilters, data.layers, "layer");
     await ensureIconsReady();
-    fitToDataIfNeeded();
+    await fitInitialView();
     await renderVisibleMarkers();
   }
 
