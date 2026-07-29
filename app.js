@@ -231,6 +231,23 @@
     return (place.d || "").trim();
   }
 
+  // A–Z US food/drink index markers laid out across the plains (long Notes lists)
+  function isIndexNotesPin(place) {
+    const name = (place.n || "").trim();
+    if (/^United States \(([A-Z]\d*|[A-Z]-[A-Z])\)$/.test(name)) return true;
+    // Trailing Coffee / Drinks markers at the end of that same row
+    if (
+      name === "United States" &&
+      place.lat > 39.74 &&
+      place.lat < 39.77 &&
+      place.lng > -100.5 &&
+      place.lng < -99.2
+    ) {
+      return true;
+    }
+    return false;
+  }
+
   function mapsCoordUrl(place) {
     return `https://www.google.com/maps?q=${place.lat},${place.lng}`;
   }
@@ -241,22 +258,20 @@
     const heading = (place.n || "").trim() || "Untitled";
     const venue = venueSubtitle(place);
     const notes = notesText(place);
+    const notesOnly = isIndexNotesPin(place);
 
     const notesBlock = notes
-      ? `<section class="rg-block notes">
+      ? `<section class="rg-block notes${notesOnly ? " notes-expanded" : ""}">
            <h4 class="block-label">Notes</h4>
-           <p class="desc">${escapeHtml(notes)}</p>
+           <div class="desc-scroll">
+             <p class="desc">${escapeHtml(notes)}</p>
+           </div>
          </section>`
       : "";
 
-    return `
-      <div class="rg-popup" data-lat="${place.lat}" data-lng="${place.lng}" data-heading="${escapeHtml(heading)}" data-venue="${escapeHtml(venue)}">
-        <p class="meta">${escapeHtml(layer)} · ${escapeHtml(icon)}</p>
-        <h3 class="title">${escapeHtml(heading)}</h3>
-
-        ${notesBlock}
-
-        <section class="rg-block details">
+    const detailsBlock = notesOnly
+      ? ""
+      : `<section class="rg-block details">
           <h4 class="block-label">Details</h4>
           <p class="address js-address">Looking up address…</p>
           <div class="details-facts js-facts" hidden></div>
@@ -264,7 +279,16 @@
           <p class="maps-link">
             <a class="js-maps-link" href="${mapsCoordUrl(place)}" target="_blank" rel="noopener noreferrer">Open in Google Maps</a>
           </p>
-        </section>
+        </section>`;
+
+    return `
+      <div class="rg-popup${notesOnly ? " notes-only" : ""}" data-lat="${place.lat}" data-lng="${place.lng}" data-heading="${escapeHtml(heading)}" data-venue="${escapeHtml(venue)}" data-notes-only="${notesOnly ? "1" : "0"}">
+        <p class="meta">${escapeHtml(layer)} · ${escapeHtml(icon)}</p>
+        <h3 class="title">${escapeHtml(heading)}</h3>
+
+        ${notesBlock}
+
+        ${detailsBlock}
       </div>
     `;
   }
@@ -422,8 +446,9 @@
   }
 
   function bindPlacePopup(marker, place) {
+    const notesOnly = isIndexNotesPin(place);
     marker.bindPopup(() => popupHtml(place), {
-      maxWidth: 300,
+      maxWidth: notesOnly ? 340 : 300,
       autoPan: true,
       autoPanPadding: [40, 40],
       // Keep popup alive if map nudges while opening
@@ -432,7 +457,8 @@
     marker.on("popupopen", (e) => {
       const node = e.popup.getElement();
       const root = node?.querySelector(".rg-popup");
-      if (root) fillAddress(root);
+      if (!root || root.getAttribute("data-notes-only") === "1") return;
+      fillAddress(root);
     });
   }
 

@@ -683,13 +683,27 @@ body {
   line-height: 1.35;
 }
 
+.rg-popup .desc-scroll {
+  max-height: 9rem;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .rg-popup .desc {
   margin: 0;
   white-space: pre-wrap;
   font-size: 0.9rem;
   line-height: 1.45;
-  max-height: 9rem;
-  overflow: auto;
+}
+
+.rg-popup.notes-only .notes-expanded .desc-scroll {
+  max-height: min(55vh, 22rem);
+}
+
+.rg-popup.notes-only .rg-block.notes {
+  border-top: 0;
+  margin-top: 0.45rem;
+  padding-top: 0;
 }
 
 .rg-popup .maps-link {
