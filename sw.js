@@ -1,14 +1,14 @@
 /* Randy's Guide service worker — works at / or /randyGuide/ */
-const CACHE = "randys-guide-v8";
+const CACHE = "randys-guide-v9";
 
 self.addEventListener("install", (event) => {
   const base = new URL(self.registration.scope).pathname;
   const PRECACHE = [
     base,
     `${base}index.html`,
-    `${base}styles.css?v=8`,
-    `${base}app.js?v=8`,
-    `${base}kml-client.js?v=8`,
+    `${base}styles.css?v=9`,
+    `${base}app.js?v=9`,
+    `${base}kml-client.js?v=9`,
     `${base}manifest.webmanifest`,
     `${base}icons/app/icon-192.png`,
     `${base}icons/app/icon-512.png`,

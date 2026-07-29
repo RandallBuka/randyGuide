@@ -129,19 +129,141 @@
     };
   }
 
+  function displayTitle(place) {
+    const desc = (place.d || "").trim();
+    const name = (place.n || "").trim();
+
+    // Descriptions often look like: "-Okonomiyaki Shimizu [Bib Gourmand]"
+    const bullet = desc.match(/^[+\-–—•]\s*([^\n\r]+)/);
+    if (bullet) {
+      let title = bullet[1].replace(/\s*\[.*?\]\s*/g, " ").trim();
+      title = title.replace(/\s{2,}/g, " ").trim();
+      // Keep the venue name before trailing notes after commas when very long
+      if (title.length > 2) return title;
+    }
+
+    if (desc) {
+      const first = desc
+        .split(/\n/)[0]
+        .replace(/^[+\-–—•]\s*/, "")
+        .replace(/\s*\[.*?\]\s*/g, " ")
+        .trim();
+      if (first.length > 2 && first.toLowerCase() !== name.toLowerCase()) {
+        return first;
+      }
+    }
+
+    return name || "Untitled";
+  }
+
+  function notesText(place) {
+    const desc = (place.d || "").trim();
+    if (!desc) return "";
+    const title = displayTitle(place);
+    // If the whole description is basically the title, don't duplicate
+    const stripped = desc
+      .replace(/^[+\-–—•]\s*/, "")
+      .replace(/\s*\[.*?\]\s*/g, " ")
+      .trim();
+    if (stripped === title || desc === title) {
+      // Still keep bracket notes if present
+      const brackets = [...desc.matchAll(/\[(.*?)\]/g)].map((m) => m[1].trim()).filter(Boolean);
+      return brackets.length ? brackets.join(" · ") : "";
+    }
+    return desc;
+  }
+
+  function mapsUrl(place) {
+    return `https://www.google.com/maps?q=${place.lat},${place.lng}`;
+  }
+
   function popupHtml(place) {
     const layer = layerMeta(place.layer)?.label || place.layer;
     const icon = iconMeta(place.icon)?.label || place.icon;
-    const desc = place.d
-      ? `<p class="desc">${escapeHtml(place.d)}</p>`
+    const title = displayTitle(place);
+    const region = (place.n || "").trim();
+    const notes = notesText(place);
+    const regionLine =
+      region && region.toLowerCase() !== title.toLowerCase()
+        ? `<p class="region">${escapeHtml(region)}</p>`
+        : "";
+    const notesBlock = notes
+      ? `<p class="desc">${escapeHtml(notes)}</p>`
       : "";
+
     return `
-      <div class="rg-popup">
+      <div class="rg-popup" data-lat="${place.lat}" data-lng="${place.lng}">
         <p class="meta">${escapeHtml(layer)} · ${escapeHtml(icon)}</p>
-        <h3 class="title">${escapeHtml(place.n)}</h3>
-        ${desc}
+        <h3 class="title">${escapeHtml(title)}</h3>
+        ${regionLine}
+        <p class="address">Looking up address…</p>
+        ${notesBlock}
+        <p class="maps-link">
+          <a href="${mapsUrl(place)}" target="_blank" rel="noopener noreferrer">Open in Google Maps</a>
+        </p>
       </div>
     `;
+  }
+
+  const addressCache = new Map();
+
+  async function fillAddress(popupRoot) {
+    const box = popupRoot?.querySelector?.(".address");
+    if (!box) return;
+    const wrap = popupRoot.closest(".rg-popup") || popupRoot;
+    const lat = Number(wrap.getAttribute("data-lat"));
+    const lng = Number(wrap.getAttribute("data-lng"));
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      box.textContent = "";
+      return;
+    }
+
+    const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+    if (addressCache.has(key)) {
+      box.textContent = addressCache.get(key);
+      return;
+    }
+
+    try {
+      const endpoint =
+        `https://api.bigdatacloud.net/data/reverse-geocode-client` +
+        `?latitude=${lat}&longitude=${lng}&localityLanguage=en`;
+      const res = await fetch(endpoint);
+      if (!res.ok) throw new Error(`geocode ${res.status}`);
+      const data = await res.json();
+      const parts = [
+        data.locality || data.city || data.principalSubdivision,
+        data.principalSubdivision,
+        data.countryName,
+      ].filter(Boolean);
+      // de-dupe adjacent repeats
+      const uniq = [];
+      for (const part of parts) {
+        if (!uniq.length || uniq[uniq.length - 1] !== part) uniq.push(part);
+      }
+      const line =
+        data.formatted ||
+        (data.localityInfo?.informative || [])
+          .slice(0, 3)
+          .map((x) => x.name)
+          .filter(Boolean)
+          .join(", ") ||
+        uniq.join(", ") ||
+        `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+      addressCache.set(key, line);
+      box.textContent = line;
+    } catch {
+      box.textContent = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    }
+  }
+
+  function bindPlacePopup(marker, place) {
+    marker.bindPopup(() => popupHtml(place), { maxWidth: 300 });
+    marker.on("popupopen", (e) => {
+      const node = e.popup.getElement();
+      const root = node?.querySelector(".rg-popup");
+      if (root) fillAddress(root);
+    });
   }
 
   function matchesFilters(place, q) {
@@ -186,7 +308,7 @@
         [place.lat, place.lng],
         markerStyle(place.icon)
       );
-      marker.bindPopup(() => popupHtml(place), { maxWidth: 280 });
+      bindPlacePopup(marker, place);
       state.layer.addLayer(marker);
     }
 
@@ -496,7 +618,7 @@
       zoomControl: false,
       worldCopyJump: true,
       preferCanvas: true,
-    }).setView([34.6937, 135.5023], 12);
+    }).setView([34.689086, 135.5154], 14);
 
     L.control.zoom({ position: "bottomright" }).addTo(state.map);
 
