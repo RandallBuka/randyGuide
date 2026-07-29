@@ -269,6 +269,105 @@
 
   const addressCache = new Map();
 
+  function formatNominatimAddress(data) {
+    if (!data) return "";
+    const a = data.address || {};
+    const street = [a.house_number, a.road || a.pedestrian || a.footway || a.path]
+      .filter(Boolean)
+      .join(" ");
+    const parts = [
+      street,
+      a.neighbourhood || a.suburb || a.quarter,
+      a.city || a.town || a.village || a.municipality || a.county,
+      a.state || a.region || a.province,
+      a.postcode,
+      a.country,
+    ].filter(Boolean);
+
+    const uniq = [];
+    for (const part of parts) {
+      if (!uniq.length || uniq[uniq.length - 1].toLowerCase() !== part.toLowerCase()) {
+        uniq.push(part);
+      }
+    }
+    if (uniq.length) return uniq.join(", ");
+    return data.display_name || "";
+  }
+
+  function formatBigDataAddress(data) {
+    if (!data) return "";
+    const admin = (data.localityInfo?.administrative || [])
+      .slice()
+      .sort((a, b) => (b.adminLevel || 0) - (a.adminLevel || 0))
+      .map((x) => x.name)
+      .filter(Boolean);
+
+    // Prefer finer admin names (street/locality-ish) over continent/timezone "informative"
+    const parts = [
+      admin[0],
+      data.locality,
+      data.city,
+      data.principalSubdivision,
+      data.postcode,
+      data.countryName,
+    ].filter(Boolean);
+
+    const uniq = [];
+    for (const part of parts) {
+      if (!uniq.length || uniq[uniq.length - 1].toLowerCase() !== part.toLowerCase()) {
+        uniq.push(part);
+      }
+    }
+    return uniq.join(", ");
+  }
+
+  async function lookupAddress(lat, lng) {
+    const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+    if (addressCache.has(key)) return addressCache.get(key);
+
+    // 1) Nominatim — usually includes street-level detail
+    try {
+      const nomUrl =
+        `https://nominatim.openstreetmap.org/reverse` +
+        `?format=jsonv2&lat=${lat}&lon=${lng}&addressdetails=1&zoom=18`;
+      const res = await fetch(nomUrl, {
+        headers: { Accept: "application/json" },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const line = formatNominatimAddress(data);
+        if (line) {
+          addressCache.set(key, line);
+          return line;
+        }
+      }
+    } catch {
+      // fall through
+    }
+
+    // 2) BigDataCloud free client API — city/region fallback
+    try {
+      const bdcUrl =
+        `https://api.bigdatacloud.net/data/reverse-geocode-client` +
+        `?latitude=${lat}&longitude=${lng}&localityLanguage=en`;
+      const res = await fetch(bdcUrl);
+      if (res.ok) {
+        const data = await res.json();
+        const line = formatBigDataAddress(data);
+        if (line) {
+          addressCache.set(key, line);
+          return line;
+        }
+      }
+    } catch {
+      // fall through
+    }
+
+    const fallback = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    addressCache.set(key, fallback);
+    return fallback;
+  }
+
   async function fillAddress(popupRoot) {
     const box = popupRoot?.querySelector?.(".address");
     if (!box) return;
@@ -276,47 +375,15 @@
     const lat = Number(wrap.getAttribute("data-lat"));
     const lng = Number(wrap.getAttribute("data-lng"));
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-      box.textContent = "";
+      box.hidden = true;
       return;
     }
 
-    const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
-    if (addressCache.has(key)) {
-      box.textContent = addressCache.get(key);
-      return;
-    }
-
-    try {
-      const endpoint =
-        `https://api.bigdatacloud.net/data/reverse-geocode-client` +
-        `?latitude=${lat}&longitude=${lng}&localityLanguage=en`;
-      const res = await fetch(endpoint);
-      if (!res.ok) throw new Error(`geocode ${res.status}`);
-      const data = await res.json();
-      const parts = [
-        data.locality || data.city || data.principalSubdivision,
-        data.principalSubdivision,
-        data.countryName,
-      ].filter(Boolean);
-      // de-dupe adjacent repeats
-      const uniq = [];
-      for (const part of parts) {
-        if (!uniq.length || uniq[uniq.length - 1] !== part) uniq.push(part);
-      }
-      const line =
-        data.formatted ||
-        (data.localityInfo?.informative || [])
-          .slice(0, 3)
-          .map((x) => x.name)
-          .filter(Boolean)
-          .join(", ") ||
-        uniq.join(", ") ||
-        `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-      addressCache.set(key, line);
-      box.textContent = line;
-    } catch {
-      box.textContent = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-    }
+    box.hidden = false;
+    box.textContent = "Looking up address…";
+    const line = await lookupAddress(lat, lng);
+    // Popup may have been closed/reopened; only update if still current
+    if (box.isConnected) box.textContent = line;
   }
 
   function bindPlacePopup(marker, place) {
