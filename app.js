@@ -30,6 +30,8 @@
     pollTimer: null,
     renderTimer: null,
     mapMoving: false,
+    renderRunning: false,
+    renderPending: false,
     loading: false,
     hasSyncApi: null,
   };
@@ -463,7 +465,8 @@
   }
 
   function placeKey(place) {
-    return `${place.icon}|${place.layer}|${place.lat}|${place.lng}|${place.n}|${place.d || ""}`;
+    if (place._id != null) return `id:${place._id}`;
+    return `${place.icon}|${place.layer}|${place.lat}|${place.lng}|${place.n}`;
   }
 
   function matchesFilters(place, q) {
@@ -490,8 +493,6 @@
   function scheduleRender({ immediate = false } = {}) {
     clearTimeout(state.renderTimer);
     const run = () => {
-      // Never rebuild markers mid-gesture — that flickers the top chrome
-      if (state.mapMoving) return;
       renderVisibleMarkers().catch((err) => console.error(err));
     };
     if (immediate) {
@@ -499,46 +500,6 @@
       return;
     }
     state.renderTimer = setTimeout(run, 40);
-  }
-
-  /** Fair geographic subsample — only used for extreme world-overview zooms. */
-  function spatializePlaces(entries, max, bounds) {
-    if (entries.length <= max) return entries;
-    const cols = Math.max(4, Math.ceil(Math.sqrt(max)));
-    const rows = cols;
-    const west = bounds.getWest();
-    const south = bounds.getSouth();
-    const width = Math.max(bounds.getEast() - west, 1e-9);
-    const height = Math.max(bounds.getNorth() - south, 1e-9);
-    const buckets = Array.from({ length: cols * rows }, () => []);
-
-    for (const item of entries) {
-      const place = item[1];
-      const c = Math.min(
-        cols - 1,
-        Math.max(0, Math.floor(((place.lng - west) / width) * cols))
-      );
-      const r = Math.min(
-        rows - 1,
-        Math.max(0, Math.floor(((place.lat - south) / height) * rows))
-      );
-      buckets[r * cols + c].push(item);
-    }
-
-    const out = [];
-    let guard = 0;
-    while (out.length < max && guard < max + 10) {
-      let added = false;
-      for (const bucket of buckets) {
-        if (out.length >= max) break;
-        if (!bucket.length) continue;
-        out.push(bucket.shift());
-        added = true;
-      }
-      if (!added) break;
-      guard += 1;
-    }
-    return out;
   }
 
   function getDevicePosition() {
@@ -594,6 +555,10 @@
     preserveFiltersAgainst(data);
     state.data = data;
     state.places = data.places;
+    // Stable ids so every place gets its own marker (no key collisions)
+    for (let i = 0; i < state.places.length; i += 1) {
+      state.places[i]._id = i;
+    }
     leafletIconCache.clear();
     preparedIconUrls.clear();
     clearAllMarkers();
@@ -601,88 +566,112 @@
     renderFilterList(els.layerFilters, data.layers, "layer");
     await ensureIconsReady();
     await fitInitialView();
-    // Don't block the Filters UI on the first heavy marker pass
     scheduleRender({ immediate: true });
   }
 
   async function renderVisibleMarkers() {
     if (!state.map || !state.layer || !state.data) return;
-    if (state.mapMoving) return;
 
+    // Wait until the map settles, then always run a full pass
+    if (state.mapMoving) {
+      state.renderPending = true;
+      return;
+    }
+    if (state.renderRunning) {
+      state.renderPending = true;
+      return;
+    }
+
+    state.renderRunning = true;
+    state.renderPending = false;
     const seq = ++renderSeq;
-    const matched = filteredPlaces();
-    const zoom = state.map.getZoom();
-    // Generous pad so edge pins don't drop during small pans / popup auto-pan
-    const bounds = state.map.getBounds().pad(0.35);
 
-    const inView = [];
-    for (const place of matched) {
-      if (bounds.contains([place.lat, place.lng])) {
-        inView.push([placeKey(place), place]);
+    try {
+      const matched = filteredPlaces();
+      // Slight pad so edge pins aren't clipped by the viewport
+      const bounds = state.map.getBounds().pad(0.2);
+
+      const shouldShow = new Map();
+      for (const place of matched) {
+        if (!Number.isFinite(place.lat) || !Number.isFinite(place.lng)) continue;
+        if (bounds.contains([place.lat, place.lng])) {
+          shouldShow.set(placeKey(place), place);
+        }
+      }
+
+      // Drop markers that left the view / no longer match filters.
+      // Never remove a marker with an open popup (auto-pan would otherwise close it).
+      for (const [key, marker] of [...state.markersByKey.entries()]) {
+        if (shouldShow.has(key)) continue;
+        if (marker.isPopupOpen()) continue;
+        state.layer.removeLayer(marker);
+        state.markersByKey.delete(key);
+      }
+
+      if (seq !== renderSeq) {
+        state.renderPending = true;
+        return;
+      }
+
+      const toAdd = [];
+      for (const [key, place] of shouldShow) {
+        if (!state.markersByKey.has(key)) toAdd.push([key, place]);
+      }
+
+      // Ensure every icon style is ready (never skip a pin for a missing icon)
+      const iconKeys = [...new Set(toAdd.map(([, p]) => p.icon))];
+      await Promise.all(iconKeys.map((k) => getLeafletIcon(k)));
+      if (seq !== renderSeq) {
+        state.renderPending = true;
+        return;
+      }
+      if (state.mapMoving) {
+        state.renderPending = true;
+        return;
+      }
+
+      const CHUNK = 80;
+      for (let i = 0; i < toAdd.length; i += CHUNK) {
+        if (seq !== renderSeq || state.mapMoving) {
+          state.renderPending = true;
+          return;
+        }
+        const chunk = toAdd.slice(i, i + CHUNK);
+        for (const [key, place] of chunk) {
+          if (state.markersByKey.has(key)) continue;
+          let icon = leafletIconCache.get(place.icon);
+          if (!icon) icon = await getLeafletIcon(place.icon);
+          if (seq !== renderSeq || state.mapMoving) {
+            state.renderPending = true;
+            return;
+          }
+          const marker = L.marker([place.lat, place.lng], {
+            icon,
+            keyboard: false,
+            riseOnHover: true,
+          });
+          bindPlacePopup(marker, place);
+          state.layer.addLayer(marker);
+          state.markersByKey.set(key, marker);
+        }
+        if (i + CHUNK < toAdd.length) {
+          await new Promise((r) => requestAnimationFrame(r));
+        }
+      }
+
+      if (seq !== renderSeq) {
+        state.renderPending = true;
+        return;
+      }
+
+      els.status.textContent = `${matched.length.toLocaleString()} of ${state.data.count.toLocaleString()} match filters · ${shouldShow.size.toLocaleString()} in view`;
+    } finally {
+      state.renderRunning = false;
+      if (state.renderPending && !state.mapMoving) {
+        state.renderPending = false;
+        scheduleRender({ immediate: true });
       }
     }
-
-    // Show every in-view pin at normal zooms. Only thin the set for extreme
-    // world overview (where 10k markers would freeze Filters / the map).
-    let display = inView;
-    let hitCap = false;
-    if (zoom < 4 && inView.length > 2500) {
-      display = spatializePlaces(inView, 2500, bounds);
-      hitCap = true;
-    }
-
-    const shouldShow = new Map(display);
-
-    // Drop markers that left the view / no longer match filters.
-    // Never remove a marker with an open popup (auto-pan would otherwise close it).
-    for (const [key, marker] of [...state.markersByKey.entries()]) {
-      if (shouldShow.has(key)) continue;
-      if (marker.isPopupOpen()) continue;
-      state.layer.removeLayer(marker);
-      state.markersByKey.delete(key);
-    }
-
-    if (seq !== renderSeq || state.mapMoving) return;
-
-    // Add only markers that are missing (keeps open popups intact)
-    const toAdd = [];
-    for (const [key, place] of shouldShow) {
-      if (!state.markersByKey.has(key)) toAdd.push([key, place]);
-    }
-
-    const iconKeys = [...new Set(toAdd.map(([, p]) => p.icon))];
-    await Promise.all(iconKeys.map((k) => getLeafletIcon(k)));
-    if (seq !== renderSeq || state.mapMoving) return;
-
-    // Chunk + rAF so the Filters drawer can still open while pins stream in
-    const CHUNK = 64;
-    for (let i = 0; i < toAdd.length; i += CHUNK) {
-      if (seq !== renderSeq || state.mapMoving) return;
-      const chunk = toAdd.slice(i, i + CHUNK);
-      for (const [key, place] of chunk) {
-        if (state.markersByKey.has(key)) continue;
-        const icon = leafletIconCache.get(place.icon);
-        if (!icon) continue;
-        const marker = L.marker([place.lat, place.lng], {
-          icon,
-          keyboard: false,
-          riseOnHover: true,
-        });
-        bindPlacePopup(marker, place);
-        state.layer.addLayer(marker);
-        state.markersByKey.set(key, marker);
-      }
-      if (i + CHUNK < toAdd.length) {
-        await new Promise((r) => requestAnimationFrame(r));
-      }
-    }
-
-    if (seq !== renderSeq) return;
-
-    const viewNote = hitCap
-      ? ` · showing ${shouldShow.size.toLocaleString()} of ${inView.length.toLocaleString()} in view (zoom in for all pins)`
-      : ` · ${shouldShow.size.toLocaleString()} in view`;
-    els.status.textContent = `${matched.length.toLocaleString()} of ${state.data.count.toLocaleString()} match filters${viewNote}`;
   }
 
   function renderFilterList(container, items, kind) {
@@ -977,13 +966,6 @@
       els.sidebarBackdrop.setAttribute("aria-hidden", String(!open));
     }
     document.body.classList.toggle("sidebar-open", open);
-    if (open) {
-      // Abort marker work so the drawer can open even when zoomed far out
-      clearTimeout(state.renderTimer);
-      renderSeq += 1;
-    } else {
-      scheduleRender();
-    }
   }
 
   function wireSidebar() {
@@ -1333,15 +1315,17 @@
 
     state.layer = L.layerGroup().addTo(state.map);
 
-    // Pause marker work while the map is moving so overlays don't flicker
+    // Pause marker work while the map is moving so overlays don't flicker;
+    // always finish a full in-view pass after the gesture ends.
     const beginMapGesture = () => {
       state.mapMoving = true;
       clearTimeout(state.renderTimer);
       renderSeq += 1; // abort any in-flight async marker pass
+      state.renderPending = true;
     };
     const endMapGesture = () => {
       state.mapMoving = false;
-      scheduleRender();
+      scheduleRender({ immediate: true });
     };
     state.map.on("movestart", beginMapGesture);
     state.map.on("zoomstart", beginMapGesture);
