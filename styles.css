@@ -358,6 +358,23 @@ body {
       drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35));
 }
 
+.leaflet-control-layers {
+  border: 0 !important;
+  border-radius: 8px !important;
+  box-shadow: var(--shadow) !important;
+  font-family: var(--font-body);
+  overflow: hidden;
+}
+
+.leaflet-control-layers-expanded {
+  padding: 0.55rem 0.7rem;
+}
+
+.leaflet-control-layers label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
 .rg-popup .title {
   margin: 0 0 0.25rem;
   font-family: var(--font-display);

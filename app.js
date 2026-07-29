@@ -42,7 +42,10 @@
     "route-pin": "#DB4436",
   };
 
-  const MAX_VISIBLE_MARKERS = 1500;
+  const MAX_VISIBLE_MARKERS = 1200;
+  const preparedIconUrls = new Map();
+  const leafletIconCache = new Map();
+  let didFitInitialView = false;
 
   const els = {
     iconFilters: document.getElementById("icon-filters"),
@@ -127,6 +130,65 @@
       fillColor: color,
       fillOpacity: 0.95,
     };
+  }
+
+  function knockoutBlack(iconUrl) {
+    const resolved = url(iconUrl);
+    if (preparedIconUrls.has(resolved)) return preparedIconUrls.get(resolved);
+
+    const promise = new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = img.naturalWidth || 32;
+          canvas.height = img.naturalHeight || 32;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0);
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const data = imageData.data;
+          for (let i = 0; i < data.length; i += 4) {
+            if (data[i] < 28 && data[i + 1] < 28 && data[i + 2] < 28) {
+              data[i + 3] = 0;
+            }
+          }
+          ctx.putImageData(imageData, 0, 0);
+          resolve(canvas.toDataURL("image/png"));
+        } catch {
+          resolve(resolved);
+        }
+      };
+      img.onerror = () => resolve(resolved);
+      img.src = resolved;
+    });
+
+    preparedIconUrls.set(resolved, promise);
+    return promise;
+  }
+
+  async function getLeafletIcon(iconKey) {
+    if (leafletIconCache.has(iconKey)) return leafletIconCache.get(iconKey);
+
+    const meta = iconMeta(iconKey) || {
+      iconUrl: "icons/503-wht-blank_maps.png",
+      tint: false,
+    };
+    const src = await knockoutBlack(meta.iconUrl);
+    const tintClass = meta.tint ? " tint" : "";
+    const icon = L.divIcon({
+      className: "rg-marker",
+      html: `<img class="rg-pin${tintClass}" src="${src}" alt="" width="28" height="28" />`,
+      iconSize: [28, 36],
+      iconAnchor: [14, 34],
+      popupAnchor: [0, -28],
+    });
+    leafletIconCache.set(iconKey, icon);
+    return icon;
+  }
+
+  async function ensureIconsReady() {
+    if (!state.data?.icons?.length) return;
+    await Promise.all(state.data.icons.map((i) => getLeafletIcon(i.key)));
   }
 
   function displayTitle(place) {
@@ -284,10 +346,36 @@
 
   function scheduleRender() {
     clearTimeout(state.renderTimer);
-    state.renderTimer = setTimeout(renderVisibleMarkers, 40);
+    state.renderTimer = setTimeout(() => {
+      renderVisibleMarkers().catch((err) => console.error(err));
+    }, 40);
   }
 
-  function renderVisibleMarkers() {
+  function fitToDataIfNeeded() {
+    if (didFitInitialView || !state.map || !state.places.length) return;
+    const matched = filteredPlaces();
+    if (!matched.length) return;
+    const latLngs = matched.map((p) => [p.lat, p.lng]);
+    const bounds = L.latLngBounds(latLngs);
+    if (!bounds.isValid()) return;
+    state.map.fitBounds(bounds.pad(0.08), { maxZoom: 5, animate: false });
+    didFitInitialView = true;
+  }
+
+  async function applyPlacesData(data) {
+    preserveFiltersAgainst(data);
+    state.data = data;
+    state.places = data.places;
+    leafletIconCache.clear();
+    preparedIconUrls.clear();
+    renderFilterList(els.iconFilters, data.icons, "icon");
+    renderFilterList(els.layerFilters, data.layers, "layer");
+    await ensureIconsReady();
+    fitToDataIfNeeded();
+    await renderVisibleMarkers();
+  }
+
+  async function renderVisibleMarkers() {
     if (!state.map || !state.layer || !state.data) return;
 
     const matched = filteredPlaces();
@@ -304,10 +392,12 @@
     state.layer.clearLayers();
 
     for (const place of visible) {
-      const marker = L.circleMarker(
-        [place.lat, place.lng],
-        markerStyle(place.icon)
-      );
+      const icon = await getLeafletIcon(place.icon);
+      const marker = L.marker([place.lat, place.lng], {
+        icon,
+        keyboard: false,
+        riseOnHover: true,
+      });
       bindPlacePopup(marker, place);
       state.layer.addLayer(marker);
     }
@@ -496,15 +586,6 @@
     }
   }
 
-  async function applyPlacesData(data) {
-    preserveFiltersAgainst(data);
-    state.data = data;
-    state.places = data.places;
-    renderFilterList(els.iconFilters, data.icons, "icon");
-    renderFilterList(els.layerFilters, data.layers, "layer");
-    renderVisibleMarkers();
-  }
-
   async function syncFromGoogleInBrowser() {
     if (!window.RandyGuideKml?.pullLiveMap) {
       throw new Error("Live sync script failed to load");
@@ -617,12 +698,11 @@
     state.map = L.map("map", {
       zoomControl: false,
       worldCopyJump: true,
-      preferCanvas: true,
-    }).setView([34.689086, 135.5154], 14);
+    }).setView([20, 0], 2);
 
     L.control.zoom({ position: "bottomright" }).addTo(state.map);
 
-    L.tileLayer(
+    const roadLayer = L.tileLayer(
       "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
       {
         attribution:
@@ -630,7 +710,31 @@
         subdomains: "abcd",
         maxZoom: 20,
       }
-    ).addTo(state.map);
+    );
+
+    const satelliteLayer = L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      {
+        attribution:
+          "Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+        maxZoom: 19,
+      }
+    );
+
+    roadLayer.addTo(state.map);
+    state.baseLayers = { road: roadLayer, satellite: satelliteLayer };
+    state.activeBase = "road";
+
+    L.control
+      .layers(
+        {
+          Map: roadLayer,
+          Satellite: satelliteLayer,
+        },
+        null,
+        { position: "topright", collapsed: false }
+      )
+      .addTo(state.map);
 
     state.layer = L.layerGroup().addTo(state.map);
     state.map.on("moveend", scheduleRender);
