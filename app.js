@@ -29,6 +29,7 @@
     contentHash: null,
     pollTimer: null,
     renderTimer: null,
+    mapMoving: false,
     loading: false,
     hasSyncApi: null,
   };
@@ -461,14 +462,15 @@
   function scheduleRender({ immediate = false } = {}) {
     clearTimeout(state.renderTimer);
     const run = () => {
+      // Never rebuild markers mid-gesture — that flickers the top chrome
+      if (state.mapMoving) return;
       renderVisibleMarkers().catch((err) => console.error(err));
     };
     if (immediate) {
       run();
       return;
     }
-    // Short debounce keeps pans smooth without waiting long after release
-    state.renderTimer = setTimeout(run, 16);
+    state.renderTimer = setTimeout(run, 40);
   }
 
   function getDevicePosition() {
@@ -1196,17 +1198,20 @@
 
     state.layer = L.layerGroup().addTo(state.map);
 
-    // Update while dragging so pins appear without waiting for release
-    let moveRaf = 0;
-    state.map.on("move", () => {
-      if (moveRaf) return;
-      moveRaf = requestAnimationFrame(() => {
-        moveRaf = 0;
-        scheduleRender({ immediate: true });
-      });
-    });
-    state.map.on("moveend", () => scheduleRender({ immediate: true }));
-    state.map.on("zoomend", () => scheduleRender({ immediate: true }));
+    // Pause marker work while the map is moving so overlays don't flicker
+    const beginMapGesture = () => {
+      state.mapMoving = true;
+      clearTimeout(state.renderTimer);
+      renderSeq += 1; // abort any in-flight async marker pass
+    };
+    const endMapGesture = () => {
+      state.mapMoving = false;
+      scheduleRender();
+    };
+    state.map.on("movestart", beginMapGesture);
+    state.map.on("zoomstart", beginMapGesture);
+    state.map.on("moveend", endMapGesture);
+    state.map.on("zoomend", endMapGesture);
   }
 
   async function boot() {

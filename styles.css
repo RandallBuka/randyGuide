@@ -303,13 +303,17 @@ body {
   position: absolute;
   top: calc(0.85rem + env(safe-area-inset-top));
   left: 50%;
-  transform: translateX(-50%);
+  transform: translate3d(-50%, 0, 0);
   z-index: 1000;
   width: min(420px, calc(100% - 8rem));
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: stretch;
   gap: 0.4rem 0;
+  /* Keep chrome on its own layer so tile/marker paints don't flicker it */
+  contain: layout style;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
 }
 
 .basemap-toggle {
@@ -726,6 +730,10 @@ body {
     font-weight: 700;
     box-shadow: var(--shadow);
     cursor: pointer;
+    transform: translateZ(0);
+    contain: layout style;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
   }
 
   .map-search {
