@@ -712,7 +712,8 @@
       }
     );
 
-    const satelliteLayer = L.tileLayer(
+    // Hybrid satellite: imagery + roads/borders/city labels (closer to Google Satellite)
+    const satelliteImagery = L.tileLayer(
       "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
       {
         attribution:
@@ -720,6 +721,27 @@
         maxZoom: 19,
       }
     );
+    const satelliteRoads = L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}",
+      {
+        opacity: 0.9,
+        maxZoom: 19,
+        pane: "overlayPane",
+      }
+    );
+    const satelliteLabels = L.tileLayer(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+      {
+        opacity: 0.95,
+        maxZoom: 19,
+        pane: "overlayPane",
+      }
+    );
+    const satelliteLayer = L.layerGroup([
+      satelliteImagery,
+      satelliteRoads,
+      satelliteLabels,
+    ]);
 
     roadLayer.addTo(state.map);
     state.baseLayers = { road: roadLayer, satellite: satelliteLayer };
