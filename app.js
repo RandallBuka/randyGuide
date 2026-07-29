@@ -1105,7 +1105,7 @@
     });
 
     document.addEventListener("click", (e) => {
-      const wrap = document.getElementById("map-search");
+      const wrap = document.querySelector(".map-chrome");
       if (wrap && !wrap.contains(e.target)) hidePlaceResults();
     });
 

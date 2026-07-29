@@ -299,28 +299,52 @@ body {
   min-width: 0;
 }
 
-.map-search {
+.map-chrome {
   position: absolute;
   top: calc(0.85rem + env(safe-area-inset-top));
   left: 50%;
   transform: translate3d(-50%, 0, 0);
   z-index: 1000;
-  width: min(420px, calc(100% - 8rem));
-  display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: stretch;
-  gap: 0.4rem 0;
-  /* Keep chrome on its own layer so tile/marker paints don't flicker it */
+  width: min(420px, calc(100% - 1.7rem));
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
   contain: layout style;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
 }
 
+.map-topbar {
+  display: flex;
+  align-items: stretch;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.sidebar-toggle {
+  display: none;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.45rem 0.85rem;
+  background: color-mix(in srgb, #ffffff 94%, var(--paper));
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
 .basemap-toggle {
-  grid-column: 1 / -1;
+  flex: 1 1 auto;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0;
+  min-width: 0;
   padding: 0.2rem;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -331,7 +355,7 @@ body {
 .basemap-toggle button {
   border: 0;
   border-radius: 9px;
-  padding: 0.45rem 0.75rem;
+  padding: 0.4rem 0.6rem;
   background: transparent;
   color: var(--ink-soft);
   font: inherit;
@@ -351,8 +375,16 @@ body {
   background: var(--paper-2);
 }
 
+.map-search {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: stretch;
+  min-width: 0;
+}
+
 .map-search input {
   grid-column: 1 / -1;
+  grid-row: 1;
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -373,7 +405,7 @@ body {
 
 .map-search-clear {
   grid-column: 2;
-  grid-row: 2;
+  grid-row: 1;
   z-index: 1;
   align-self: center;
   justify-self: end;
@@ -533,10 +565,6 @@ body {
   to {
     transform: rotate(360deg);
   }
-}
-
-.sidebar-toggle {
-  display: none;
 }
 
 .rg-marker {
@@ -717,27 +745,9 @@ body {
 
   .sidebar-toggle {
     display: inline-flex;
-    position: absolute;
-    top: calc(0.85rem + env(safe-area-inset-top));
-    left: calc(0.85rem + env(safe-area-inset-left));
-    z-index: 2100;
-    border: 0;
-    border-radius: 999px;
-    padding: 0.65rem 1rem;
-    background: color-mix(in srgb, var(--paper) 92%, white);
-    color: var(--ink);
-    font: inherit;
-    font-weight: 700;
-    box-shadow: var(--shadow);
-    cursor: pointer;
-    transform: translateZ(0);
-    contain: layout style;
-    backface-visibility: hidden;
-    -webkit-backface-visibility: hidden;
   }
 
-  .map-search {
-    top: calc(3.55rem + env(safe-area-inset-top));
+  .map-chrome {
     left: calc(0.85rem + env(safe-area-inset-left));
     right: calc(0.85rem + env(safe-area-inset-right));
     transform: none;
