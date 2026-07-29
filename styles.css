@@ -392,14 +392,6 @@ body {
   line-height: 1.2;
 }
 
-.rg-popup .subtitle {
-  margin: 0.2rem 0 0;
-  color: var(--ink-soft);
-  font-size: 0.92rem;
-  font-weight: 500;
-  line-height: 1.35;
-}
-
 .rg-popup .rg-block {
   margin-top: 0.75rem;
   padding-top: 0.7rem;

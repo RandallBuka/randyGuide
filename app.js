@@ -221,40 +221,7 @@
   }
 
   function notesText(place) {
-    const desc = (place.d || "").trim();
-    if (!desc) return "";
-    const venue = venueSubtitle(place);
-
-    // Keep bracket callouts from the first line even if we promote the venue name
-    const brackets = [...desc.matchAll(/\[(.*?)\]/g)]
-      .map((m) => m[1].trim())
-      .filter(Boolean);
-
-    let body = desc;
-    if (venue) {
-      // Strip the leading venue bullet line so Notes don't repeat the subtitle
-      body = body.replace(/^[+\-–—•]\s*[^\n\r]+/, "").trim();
-      // Also strip a plain first-line duplicate of the venue
-      const lines = body.split(/\n/);
-      if (
-        lines[0] &&
-        lines[0].replace(/\[.*?\]/g, "").trim().toLowerCase() ===
-          venue.toLowerCase()
-      ) {
-        body = lines.slice(1).join("\n").trim();
-      }
-    }
-
-    const extras = brackets.filter(
-      (b) => !venue || !venue.toLowerCase().includes(b.toLowerCase())
-    );
-    if (!body && extras.length) return extras.map((b) => `[${b}]`).join("\n");
-    if (body && extras.length) {
-      // Avoid duplicating brackets already present in body
-      const missing = extras.filter((b) => !body.includes(b));
-      return missing.length ? `${body}\n${missing.map((b) => `[${b}]`).join("\n")}` : body;
-    }
-    return body;
+    return (place.d || "").trim();
   }
 
   function mapsCoordUrl(place) {
@@ -265,12 +232,9 @@
     const layer = layerMeta(place.layer)?.label || place.layer;
     const icon = iconMeta(place.icon)?.label || place.icon;
     const heading = (place.n || "").trim() || "Untitled";
-    const subtitle = venueSubtitle(place);
+    const venue = venueSubtitle(place);
     const notes = notesText(place);
 
-    const subtitleBlock = subtitle
-      ? `<p class="subtitle">${escapeHtml(subtitle)}</p>`
-      : "";
     const notesBlock = notes
       ? `<section class="rg-block notes">
            <h4 class="block-label">Notes</h4>
@@ -279,10 +243,9 @@
       : "";
 
     return `
-      <div class="rg-popup" data-lat="${place.lat}" data-lng="${place.lng}" data-heading="${escapeHtml(heading)}" data-venue="${escapeHtml(subtitle)}">
+      <div class="rg-popup" data-lat="${place.lat}" data-lng="${place.lng}" data-heading="${escapeHtml(heading)}" data-venue="${escapeHtml(venue)}">
         <p class="meta">${escapeHtml(layer)} · ${escapeHtml(icon)}</p>
         <h3 class="title">${escapeHtml(heading)}</h3>
-        ${subtitleBlock}
 
         ${notesBlock}
 
@@ -926,9 +889,9 @@
       satelliteLabels,
     ]);
 
-    roadLayer.addTo(state.map);
+    satelliteLayer.addTo(state.map);
     state.baseLayers = { road: roadLayer, satellite: satelliteLayer };
-    state.activeBase = "road";
+    state.activeBase = "satellite";
 
     L.control
       .layers(
