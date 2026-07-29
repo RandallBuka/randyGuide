@@ -32,7 +32,7 @@
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
       crossorigin=""
     />
-    <link rel="stylesheet" href="styles.css?v=16" />
+    <link rel="stylesheet" href="styles.css?v=17" />
   </head>
   <body>
     <div class="app">
@@ -101,6 +101,18 @@
 
       <main class="map-pane">
         <div class="map-search" id="map-search">
+          <div class="basemap-toggle" role="group" aria-label="Map style">
+            <button type="button" data-basemap="road" aria-pressed="false">
+              Map
+            </button>
+            <button
+              type="button"
+              data-basemap="satellite"
+              aria-pressed="true"
+            >
+              Satellite
+            </button>
+          </div>
           <label class="sr-only" for="place-search">Search any place</label>
           <input
             id="place-search"
@@ -157,7 +169,7 @@
       crossorigin=""
     ></script>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-    <script src="kml-client.js?v=16"></script>
-    <script src="app.js?v=16"></script>
+    <script src="kml-client.js?v=17"></script>
+    <script src="app.js?v=17"></script>
   </body>
 </html>

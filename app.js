@@ -1113,6 +1113,33 @@
     });
   }
 
+  function setBaseLayer(key) {
+    if (!state.map || !state.baseLayers) return;
+    if (key !== "road" && key !== "satellite") return;
+    if (state.activeBase === key) return;
+
+    const prev = state.baseLayers[state.activeBase];
+    const next = state.baseLayers[key];
+    if (prev) state.map.removeLayer(prev);
+    if (next) state.map.addLayer(next);
+    state.activeBase = key;
+
+    document.querySelectorAll("[data-basemap]").forEach((btn) => {
+      btn.setAttribute(
+        "aria-pressed",
+        String(btn.getAttribute("data-basemap") === key)
+      );
+    });
+  }
+
+  function wireBasemapToggle() {
+    document.querySelectorAll("[data-basemap]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        setBaseLayer(btn.getAttribute("data-basemap"));
+      });
+    });
+  }
+
   function initMap() {
     state.map = L.map("map", {
       zoomControl: false,
@@ -1165,17 +1192,7 @@
     satelliteLayer.addTo(state.map);
     state.baseLayers = { road: roadLayer, satellite: satelliteLayer };
     state.activeBase = "satellite";
-
-    L.control
-      .layers(
-        {
-          Map: roadLayer,
-          Satellite: satelliteLayer,
-        },
-        null,
-        { position: "topright", collapsed: false }
-      )
-      .addTo(state.map);
+    wireBasemapToggle();
 
     state.layer = L.layerGroup().addTo(state.map);
 
