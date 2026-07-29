@@ -501,16 +501,7 @@
     state.renderTimer = setTimeout(run, 40);
   }
 
-  function maxMarkersForZoom(zoom) {
-    if (zoom < 4) return 200;
-    if (zoom < 5) return 450;
-    if (zoom < 6) return 800;
-    if (zoom < 8) return 1400;
-    if (zoom < 10) return 2200;
-    return 3500;
-  }
-
-  /** Fair geographic subsample so one region can't fill the whole budget. */
+  /** Fair geographic subsample — only used for extreme world-overview zooms. */
   function spatializePlaces(entries, max, bounds) {
     if (entries.length <= max) return entries;
     const cols = Math.max(4, Math.ceil(Math.sqrt(max)));
@@ -621,7 +612,6 @@
     const seq = ++renderSeq;
     const matched = filteredPlaces();
     const zoom = state.map.getZoom();
-    const maxMarkers = maxMarkersForZoom(zoom);
     // Generous pad so edge pins don't drop during small pans / popup auto-pan
     const bounds = state.map.getBounds().pad(0.35);
 
@@ -632,18 +622,22 @@
       }
     }
 
-    const limited = spatializePlaces(inView, maxMarkers, bounds);
-    const shouldShow = new Map(limited);
-    const hitCap = inView.length > shouldShow.size;
+    // Show every in-view pin at normal zooms. Only thin the set for extreme
+    // world overview (where 10k markers would freeze Filters / the map).
+    let display = inView;
+    let hitCap = false;
+    if (zoom < 4 && inView.length > 2500) {
+      display = spatializePlaces(inView, 2500, bounds);
+      hitCap = true;
+    }
 
-    // Drop markers that left the view / no longer match filters / lost the budget.
+    const shouldShow = new Map(display);
+
+    // Drop markers that left the view / no longer match filters.
     // Never remove a marker with an open popup (auto-pan would otherwise close it).
     for (const [key, marker] of [...state.markersByKey.entries()]) {
       if (shouldShow.has(key)) continue;
-      if (marker.isPopupOpen()) {
-        shouldShow.set(key, null); // keep key so we don't try to re-add
-        continue;
-      }
+      if (marker.isPopupOpen()) continue;
       state.layer.removeLayer(marker);
       state.markersByKey.delete(key);
     }
@@ -653,7 +647,6 @@
     // Add only markers that are missing (keeps open popups intact)
     const toAdd = [];
     for (const [key, place] of shouldShow) {
-      if (!place) continue;
       if (!state.markersByKey.has(key)) toAdd.push([key, place]);
     }
 
@@ -661,8 +654,8 @@
     await Promise.all(iconKeys.map((k) => getLeafletIcon(k)));
     if (seq !== renderSeq || state.mapMoving) return;
 
-    // Small chunks + rAF so Filters taps stay responsive while pins stream in
-    const CHUNK = 48;
+    // Chunk + rAF so the Filters drawer can still open while pins stream in
+    const CHUNK = 64;
     for (let i = 0; i < toAdd.length; i += CHUNK) {
       if (seq !== renderSeq || state.mapMoving) return;
       const chunk = toAdd.slice(i, i + CHUNK);
@@ -686,10 +679,9 @@
 
     if (seq !== renderSeq) return;
 
-    const viewCount = [...shouldShow.values()].filter(Boolean).length;
     const viewNote = hitCap
-      ? ` · showing ${viewCount.toLocaleString()} of ${inView.length.toLocaleString()} in view (zoom in for denser pins)`
-      : ` · ${viewCount.toLocaleString()} in view`;
+      ? ` · showing ${shouldShow.size.toLocaleString()} of ${inView.length.toLocaleString()} in view (zoom in for all pins)`
+      : ` · ${shouldShow.size.toLocaleString()} in view`;
     els.status.textContent = `${matched.length.toLocaleString()} of ${state.data.count.toLocaleString()} match filters${viewNote}`;
   }
 
