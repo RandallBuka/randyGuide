@@ -25,6 +25,7 @@
     map: null,
     layer: null,
     markersByKey: new Map(),
+    searchMarker: null,
     contentHash: null,
     pollTimer: null,
     renderTimer: null,
@@ -52,6 +53,9 @@
     iconFilters: document.getElementById("icon-filters"),
     layerFilters: document.getElementById("layer-filters"),
     search: document.getElementById("search"),
+    placeSearch: document.getElementById("place-search"),
+    placeSearchClear: document.getElementById("place-search-clear"),
+    placeSearchResults: document.getElementById("place-search-results"),
     status: document.getElementById("status"),
     syncStatus: document.getElementById("sync-status"),
     syncNow: document.getElementById("sync-now"),
@@ -867,6 +871,8 @@
       }, 120);
     });
 
+    wirePlaceSearch();
+
     els.sidebarToggle.addEventListener("click", () => {
       const open = !els.sidebar.classList.contains("open");
       els.sidebar.classList.toggle("open", open);
@@ -875,6 +881,235 @@
 
     els.syncNow.addEventListener("click", () => {
       syncNow();
+    });
+  }
+
+  function formatPhotonLabel(props) {
+    const title =
+      props.name ||
+      props.street ||
+      props.city ||
+      props.town ||
+      props.state ||
+      props.country ||
+      "Result";
+    const parts = [
+      props.housenumber && props.street
+        ? `${props.housenumber} ${props.street}`
+        : props.street,
+      props.city || props.town || props.village,
+      props.state,
+      props.country,
+    ].filter(Boolean);
+    const subtitle = parts
+      .filter((p) => p.toLowerCase() !== String(title).toLowerCase())
+      .join(", ");
+    return { title, subtitle };
+  }
+
+  async function searchWorldPlaces(query) {
+    const q = query.trim();
+    if (q.length < 2) return [];
+
+    try {
+      const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=6&lang=en`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        const mapped = (data.features || [])
+          .map((f) => {
+            const coords = f.geometry?.coordinates;
+            if (!coords || coords.length < 2) return null;
+            const [lng, lat] = coords;
+            const { title, subtitle } = formatPhotonLabel(f.properties || {});
+            return { lat, lng, title, subtitle };
+          })
+          .filter(Boolean);
+        if (mapped.length) return mapped;
+      }
+    } catch {
+      // fall through to Nominatim
+    }
+
+    try {
+      const url =
+        `https://nominatim.openstreetmap.org/search` +
+        `?format=jsonv2&q=${encodeURIComponent(q)}&limit=6&addressdetails=1`;
+      const res = await fetch(url, { headers: { Accept: "application/json" } });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return (data || []).map((r) => {
+        const title = r.name || String(r.display_name || "").split(",")[0] || "Result";
+        return {
+          lat: Number(r.lat),
+          lng: Number(r.lon),
+          title,
+          subtitle: r.display_name || "",
+        };
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  function hidePlaceResults() {
+    if (!els.placeSearchResults) return;
+    els.placeSearchResults.hidden = true;
+    els.placeSearchResults.innerHTML = "";
+  }
+
+  function clearPlaceSearchMarker() {
+    if (state.searchMarker && state.map) {
+      state.map.removeLayer(state.searchMarker);
+    }
+    state.searchMarker = null;
+  }
+
+  function clearPlaceSearch() {
+    clearPlaceSearchMarker();
+    hidePlaceResults();
+    if (els.placeSearch) els.placeSearch.value = "";
+    if (els.placeSearchClear) els.placeSearchClear.hidden = true;
+  }
+
+  function showPlaceOnMap(place) {
+    if (!state.map) return;
+    clearPlaceSearchMarker();
+    hidePlaceResults();
+
+    const icon = L.divIcon({
+      className: "rg-search-marker",
+      html: `<span class="rg-search-pin" aria-hidden="true"></span>`,
+      iconSize: [22, 22],
+      iconAnchor: [11, 22],
+      popupAnchor: [0, -18],
+    });
+
+    const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+      `${place.title} ${place.subtitle || ""} ${place.lat},${place.lng}`
+    )}`;
+
+    state.searchMarker = L.marker([place.lat, place.lng], {
+      icon,
+      zIndexOffset: 2000,
+      keyboard: false,
+    })
+      .addTo(state.map)
+      .bindPopup(
+        `<div class="rg-search-popup">
+          <h3 class="title">${escapeHtml(place.title)}</h3>
+          ${
+            place.subtitle
+              ? `<p class="sub">${escapeHtml(place.subtitle)}</p>`
+              : ""
+          }
+          <p class="hint">Search result — not in Randy's Guide</p>
+          <p class="maps-link"><a href="${mapsUrl}" target="_blank" rel="noopener noreferrer">Open in Google Maps</a></p>
+        </div>`,
+        { maxWidth: 280 }
+      )
+      .openPopup();
+
+    const targetZoom = Math.max(state.map.getZoom(), 14);
+    state.map.flyTo([place.lat, place.lng], targetZoom, { duration: 0.75 });
+    if (els.placeSearchClear) els.placeSearchClear.hidden = false;
+  }
+
+  function renderPlaceResults(results, { status = "" } = {}) {
+    const list = els.placeSearchResults;
+    if (!list) return;
+    list.innerHTML = "";
+
+    if (status) {
+      const li = document.createElement("li");
+      li.className = "result-status";
+      li.textContent = status;
+      list.appendChild(li);
+      list.hidden = false;
+      return;
+    }
+
+    if (!results.length) {
+      const li = document.createElement("li");
+      li.className = "result-empty";
+      li.textContent = "No places found";
+      list.appendChild(li);
+      list.hidden = false;
+      return;
+    }
+
+    for (const place of results) {
+      const li = document.createElement("li");
+      li.setAttribute("role", "option");
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.innerHTML = `<span class="result-title">${escapeHtml(place.title)}</span>${
+        place.subtitle
+          ? `<span class="result-sub">${escapeHtml(place.subtitle)}</span>`
+          : ""
+      }`;
+      btn.addEventListener("click", () => {
+        if (els.placeSearch) els.placeSearch.value = place.title;
+        showPlaceOnMap(place);
+      });
+      li.appendChild(btn);
+      list.appendChild(li);
+    }
+    list.hidden = false;
+  }
+
+  function wirePlaceSearch() {
+    if (!els.placeSearch || !els.placeSearchResults) return;
+
+    let timer = null;
+    let seq = 0;
+
+    const runSearch = async () => {
+      const q = els.placeSearch.value.trim();
+      if (els.placeSearchClear) els.placeSearchClear.hidden = !q && !state.searchMarker;
+      if (q.length < 2) {
+        hidePlaceResults();
+        return;
+      }
+      const mySeq = ++seq;
+      renderPlaceResults([], { status: "Searching…" });
+      const results = await searchWorldPlaces(q);
+      if (mySeq !== seq) return;
+      renderPlaceResults(results);
+    };
+
+    els.placeSearch.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = setTimeout(runSearch, 280);
+    });
+
+    els.placeSearch.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        hidePlaceResults();
+        els.placeSearch.blur();
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const first = els.placeSearchResults?.querySelector("button");
+        if (first) first.click();
+        else runSearch();
+      }
+    });
+
+    els.placeSearch.addEventListener("focus", () => {
+      if (els.placeSearchResults && els.placeSearchResults.children.length) {
+        els.placeSearchResults.hidden = false;
+      }
+    });
+
+    document.addEventListener("click", (e) => {
+      const wrap = document.getElementById("map-search");
+      if (wrap && !wrap.contains(e.target)) hidePlaceResults();
+    });
+
+    els.placeSearchClear?.addEventListener("click", () => {
+      clearPlaceSearch();
+      els.placeSearch.focus();
     });
   }
 

@@ -32,7 +32,7 @@
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
       crossorigin=""
     />
-    <link rel="stylesheet" href="styles.css?v=15" />
+    <link rel="stylesheet" href="styles.css?v=16" />
   </head>
   <body>
     <div class="app">
@@ -50,7 +50,7 @@
           <input
             id="search"
             type="search"
-            placeholder="Search places…"
+            placeholder="Filter guide pins…"
             autocomplete="off"
           />
         </div>
@@ -100,6 +100,32 @@
       </button>
 
       <main class="map-pane">
+        <div class="map-search" id="map-search">
+          <label class="sr-only" for="place-search">Search any place</label>
+          <input
+            id="place-search"
+            type="search"
+            placeholder="Search any place…"
+            autocomplete="off"
+            enterkeyhint="search"
+          />
+          <button
+            type="button"
+            id="place-search-clear"
+            class="map-search-clear"
+            hidden
+            aria-label="Clear place search"
+          >
+            ×
+          </button>
+          <ul
+            id="place-search-results"
+            class="map-search-results"
+            hidden
+            role="listbox"
+            aria-label="Place search results"
+          ></ul>
+        </div>
         <div id="map" role="application" aria-label="Randy's Guide map"></div>
         <div id="loading" class="loading" hidden>
           <div class="spinner" aria-hidden="true"></div>
@@ -131,7 +157,7 @@
       crossorigin=""
     ></script>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-    <script src="kml-client.js?v=15"></script>
-    <script src="app.js?v=15"></script>
+    <script src="kml-client.js?v=16"></script>
+    <script src="app.js?v=16"></script>
   </body>
 </html>
