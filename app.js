@@ -64,6 +64,8 @@
     loading: document.getElementById("loading"),
     sidebar: document.getElementById("sidebar"),
     sidebarToggle: document.getElementById("sidebar-toggle"),
+    sidebarClose: document.getElementById("sidebar-close"),
+    sidebarBackdrop: document.getElementById("sidebar-backdrop"),
   };
 
   function setLoading(on, label = "Loading places…") {
@@ -874,16 +876,58 @@
     });
 
     wirePlaceSearch();
-
-    els.sidebarToggle.addEventListener("click", () => {
-      const open = !els.sidebar.classList.contains("open");
-      els.sidebar.classList.toggle("open", open);
-      els.sidebarToggle.setAttribute("aria-expanded", String(open));
-    });
+    wireSidebar();
 
     els.syncNow.addEventListener("click", () => {
       syncNow();
     });
+  }
+
+  function setSidebarOpen(open) {
+    if (!els.sidebar) return;
+    els.sidebar.classList.toggle("open", open);
+    els.sidebarToggle?.setAttribute("aria-expanded", String(open));
+    if (els.sidebarBackdrop) {
+      els.sidebarBackdrop.hidden = !open;
+      els.sidebarBackdrop.classList.toggle("open", open);
+      els.sidebarBackdrop.setAttribute("aria-hidden", String(!open));
+    }
+    document.body.classList.toggle("sidebar-open", open);
+  }
+
+  function wireSidebar() {
+    els.sidebarToggle?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setSidebarOpen(!els.sidebar.classList.contains("open"));
+    });
+
+    els.sidebarClose?.addEventListener("click", () => {
+      setSidebarOpen(false);
+    });
+
+    els.sidebarBackdrop?.addEventListener("click", () => {
+      setSidebarOpen(false);
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && els.sidebar?.classList.contains("open")) {
+        setSidebarOpen(false);
+      }
+    });
+
+    // Tap/click the map (or anywhere outside the drawer) closes filters
+    document.addEventListener(
+      "pointerdown",
+      (e) => {
+        if (!els.sidebar?.classList.contains("open")) return;
+        const t = e.target;
+        if (els.sidebar.contains(t)) return;
+        if (els.sidebarToggle?.contains(t)) return;
+        if (els.sidebarClose?.contains(t)) return;
+        setSidebarOpen(false);
+      },
+      true
+    );
   }
 
   function formatPhotonLabel(props) {

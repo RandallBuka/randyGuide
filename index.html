@@ -32,12 +32,26 @@
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
       crossorigin=""
     />
-    <link rel="stylesheet" href="styles.css?v=19" />
+    <link rel="stylesheet" href="styles.css?v=20" />
   </head>
   <body>
     <div class="app">
+      <div
+        class="sidebar-backdrop"
+        id="sidebar-backdrop"
+        hidden
+        aria-hidden="true"
+      ></div>
       <aside class="sidebar" id="sidebar">
         <header class="sidebar-header">
+          <button
+            type="button"
+            class="sidebar-close"
+            id="sidebar-close"
+            aria-label="Close filters"
+          >
+            ← Back
+          </button>
           <p class="eyebrow">Travel map</p>
           <h1>Randy's Guide</h1>
           <p class="subtitle">
@@ -172,7 +186,7 @@
       crossorigin=""
     ></script>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-    <script src="kml-client.js?v=19"></script>
-    <script src="app.js?v=19"></script>
+    <script src="kml-client.js?v=20"></script>
+    <script src="app.js?v=20"></script>
   </body>
 </html>
