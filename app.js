@@ -501,6 +501,55 @@
     state.renderTimer = setTimeout(run, 40);
   }
 
+  function maxMarkersForZoom(zoom) {
+    if (zoom < 4) return 200;
+    if (zoom < 5) return 450;
+    if (zoom < 6) return 800;
+    if (zoom < 8) return 1400;
+    if (zoom < 10) return 2200;
+    return 3500;
+  }
+
+  /** Fair geographic subsample so one region can't fill the whole budget. */
+  function spatializePlaces(entries, max, bounds) {
+    if (entries.length <= max) return entries;
+    const cols = Math.max(4, Math.ceil(Math.sqrt(max)));
+    const rows = cols;
+    const west = bounds.getWest();
+    const south = bounds.getSouth();
+    const width = Math.max(bounds.getEast() - west, 1e-9);
+    const height = Math.max(bounds.getNorth() - south, 1e-9);
+    const buckets = Array.from({ length: cols * rows }, () => []);
+
+    for (const item of entries) {
+      const place = item[1];
+      const c = Math.min(
+        cols - 1,
+        Math.max(0, Math.floor(((place.lng - west) / width) * cols))
+      );
+      const r = Math.min(
+        rows - 1,
+        Math.max(0, Math.floor(((place.lat - south) / height) * rows))
+      );
+      buckets[r * cols + c].push(item);
+    }
+
+    const out = [];
+    let guard = 0;
+    while (out.length < max && guard < max + 10) {
+      let added = false;
+      for (const bucket of buckets) {
+        if (out.length >= max) break;
+        if (!bucket.length) continue;
+        out.push(bucket.shift());
+        added = true;
+      }
+      if (!added) break;
+      guard += 1;
+    }
+    return out;
+  }
+
   function getDevicePosition() {
     return new Promise((resolve, reject) => {
       if (!navigator.geolocation) {
@@ -561,49 +610,61 @@
     renderFilterList(els.layerFilters, data.layers, "layer");
     await ensureIconsReady();
     await fitInitialView();
-    await renderVisibleMarkers();
+    // Don't block the Filters UI on the first heavy marker pass
+    scheduleRender({ immediate: true });
   }
 
   async function renderVisibleMarkers() {
     if (!state.map || !state.layer || !state.data) return;
+    if (state.mapMoving) return;
 
     const seq = ++renderSeq;
     const matched = filteredPlaces();
+    const zoom = state.map.getZoom();
+    const maxMarkers = maxMarkersForZoom(zoom);
     // Generous pad so edge pins don't drop during small pans / popup auto-pan
     const bounds = state.map.getBounds().pad(0.35);
 
-    const shouldShow = new Map();
+    const inView = [];
     for (const place of matched) {
       if (bounds.contains([place.lat, place.lng])) {
-        shouldShow.set(placeKey(place), place);
+        inView.push([placeKey(place), place]);
       }
     }
 
-    // Drop markers that left the view / no longer match filters.
+    const limited = spatializePlaces(inView, maxMarkers, bounds);
+    const shouldShow = new Map(limited);
+    const hitCap = inView.length > shouldShow.size;
+
+    // Drop markers that left the view / no longer match filters / lost the budget.
     // Never remove a marker with an open popup (auto-pan would otherwise close it).
     for (const [key, marker] of [...state.markersByKey.entries()]) {
       if (shouldShow.has(key)) continue;
-      if (marker.isPopupOpen()) continue;
+      if (marker.isPopupOpen()) {
+        shouldShow.set(key, null); // keep key so we don't try to re-add
+        continue;
+      }
       state.layer.removeLayer(marker);
       state.markersByKey.delete(key);
     }
 
-    if (seq !== renderSeq) return;
+    if (seq !== renderSeq || state.mapMoving) return;
 
     // Add only markers that are missing (keeps open popups intact)
     const toAdd = [];
     for (const [key, place] of shouldShow) {
+      if (!place) continue;
       if (!state.markersByKey.has(key)) toAdd.push([key, place]);
     }
 
     const iconKeys = [...new Set(toAdd.map(([, p]) => p.icon))];
     await Promise.all(iconKeys.map((k) => getLeafletIcon(k)));
-    if (seq !== renderSeq) return;
+    if (seq !== renderSeq || state.mapMoving) return;
 
-    // Sync adds after icons are ready — no per-marker await (faster, no mid-add gaps)
-    const CHUNK = 120;
+    // Small chunks + rAF so Filters taps stay responsive while pins stream in
+    const CHUNK = 48;
     for (let i = 0; i < toAdd.length; i += CHUNK) {
-      if (seq !== renderSeq) return;
+      if (seq !== renderSeq || state.mapMoving) return;
       const chunk = toAdd.slice(i, i + CHUNK);
       for (const [key, place] of chunk) {
         if (state.markersByKey.has(key)) continue;
@@ -625,7 +686,11 @@
 
     if (seq !== renderSeq) return;
 
-    els.status.textContent = `${matched.length.toLocaleString()} of ${state.data.count.toLocaleString()} match filters · ${shouldShow.size.toLocaleString()} in view`;
+    const viewCount = [...shouldShow.values()].filter(Boolean).length;
+    const viewNote = hitCap
+      ? ` · showing ${viewCount.toLocaleString()} of ${inView.length.toLocaleString()} in view (zoom in for denser pins)`
+      : ` · ${viewCount.toLocaleString()} in view`;
+    els.status.textContent = `${matched.length.toLocaleString()} of ${state.data.count.toLocaleString()} match filters${viewNote}`;
   }
 
   function renderFilterList(container, items, kind) {
@@ -647,7 +712,8 @@
         const set = kind === "icon" ? state.activeIcons : state.activeLayers;
         if (input.checked) set.add(item.key);
         else set.delete(item.key);
-        scheduleRender({ immediate: true });
+        // Deferred so the checkbox UI paints before a heavy marker pass
+        scheduleRender();
       });
 
       const text = document.createElement("span");
@@ -691,7 +757,7 @@
       );
       renderFilterList(els.layerFilters, state.data.layers, "layer");
     }
-    scheduleRender({ immediate: true });
+    scheduleRender();
   }
 
   function preserveFiltersAgainst(nextData) {
@@ -897,7 +963,7 @@
       clearTimeout(searchTimer);
       searchTimer = setTimeout(() => {
         state.query = els.search.value;
-        scheduleRender({ immediate: true });
+        scheduleRender();
       }, 120);
     });
 
@@ -919,6 +985,13 @@
       els.sidebarBackdrop.setAttribute("aria-hidden", String(!open));
     }
     document.body.classList.toggle("sidebar-open", open);
+    if (open) {
+      // Abort marker work so the drawer can open even when zoomed far out
+      clearTimeout(state.renderTimer);
+      renderSeq += 1;
+    } else {
+      scheduleRender();
+    }
   }
 
   function wireSidebar() {
