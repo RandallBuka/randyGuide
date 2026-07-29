@@ -1,14 +1,14 @@
 /* Randy's Guide service worker — works at / or /randyGuide/ */
-const CACHE = "randys-guide-v15";
+const CACHE = "randys-guide-v16";
 
 self.addEventListener("install", (event) => {
   const base = new URL(self.registration.scope).pathname;
   const PRECACHE = [
     base,
     `${base}index.html`,
-    `${base}styles.css?v=15`,
-    `${base}app.js?v=15`,
-    `${base}kml-client.js?v=15`,
+    `${base}styles.css?v=16`,
+    `${base}app.js?v=16`,
+    `${base}kml-client.js?v=16`,
     `${base}manifest.webmanifest`,
     `${base}icons/app/icon-192.png`,
     `${base}icons/app/icon-512.png`,
@@ -48,6 +48,27 @@ self.addEventListener("fetch", (event) => {
     url.pathname.endsWith("/map.kml")
   ) {
     event.respondWith(fetch(req).catch(() => caches.match(req)));
+    return;
+  }
+
+  // App shell HTML: network-first so deploys aren't stuck behind an old cache
+  const isNavigate = req.mode === "navigate";
+  const isHtml =
+    url.pathname === base ||
+    url.pathname === `${base}index.html` ||
+    url.pathname.endsWith("/index.html");
+  if (isNavigate || isHtml) {
+    event.respondWith(
+      fetch(req)
+        .then((res) => {
+          if (res && res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then((cache) => cache.put(req, copy));
+          }
+          return res;
+        })
+        .catch(() => caches.match(req))
+    );
     return;
   }
 
