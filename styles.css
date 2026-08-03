@@ -43,6 +43,7 @@ body {
 
   .search-wrap input,
   .map-search input,
+  .notes-search input,
   .rg-popup,
   .filter-item {
     user-select: text;
@@ -683,6 +684,30 @@ body {
   line-height: 1.35;
 }
 
+.rg-popup .notes-search {
+  margin: 0 0 0.45rem;
+}
+
+.rg-popup .notes-search[hidden] {
+  display: none !important;
+}
+
+.rg-popup .notes-search input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.45rem 0.65rem;
+  background: #ffffff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.85rem;
+  outline: none;
+}
+
+.rg-popup .notes-search input:focus {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+}
+
 .rg-popup .desc-scroll {
   max-height: 9rem;
   overflow: auto;
@@ -694,6 +719,13 @@ body {
   white-space: pre-wrap;
   font-size: 0.9rem;
   line-height: 1.45;
+}
+
+.rg-popup .desc mark {
+  background: color-mix(in srgb, var(--accent) 28%, #ffe08a);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 0.1em;
 }
 
 .rg-popup.notes-only .notes-expanded .desc-scroll {

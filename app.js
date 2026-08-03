@@ -266,6 +266,16 @@
     const notesBlock = notes
       ? `<section class="rg-block notes${notesOnly ? " notes-expanded" : ""}">
            <h4 class="block-label">Notes</h4>
+           <div class="notes-search" hidden>
+             <input
+               type="search"
+               class="js-notes-search"
+               placeholder="Search notes…"
+               aria-label="Search notes"
+               autocomplete="off"
+               enterkeyhint="search"
+             />
+           </div>
            <div class="desc-scroll">
              <p class="desc">${escapeHtml(notes)}</p>
            </div>
@@ -448,6 +458,77 @@
     }
   }
 
+  function highlightNotesText(text, query) {
+    if (!query) return escapeHtml(text);
+    const lower = text.toLowerCase();
+    const q = query.toLowerCase();
+    let out = "";
+    let i = 0;
+    while (i < text.length) {
+      const idx = lower.indexOf(q, i);
+      if (idx === -1) {
+        out += escapeHtml(text.slice(i));
+        break;
+      }
+      out += escapeHtml(text.slice(i, idx));
+      out += `<mark>${escapeHtml(text.slice(idx, idx + query.length))}</mark>`;
+      i = idx + query.length;
+    }
+    return out;
+  }
+
+  function setupNotesSearch(root) {
+    const scroll = root.querySelector(".desc-scroll");
+    const desc = root.querySelector(".desc");
+    const searchWrap = root.querySelector(".notes-search");
+    const input = root.querySelector(".js-notes-search");
+    if (!scroll || !desc || !searchWrap || !input) return;
+
+    const original = desc.textContent || "";
+    let wired = searchWrap.dataset.wired === "1";
+
+    const syncVisibility = () => {
+      const needsScroll = scroll.scrollHeight > scroll.clientHeight + 1;
+      searchWrap.hidden = !needsScroll;
+      if (!needsScroll && input.value) {
+        input.value = "";
+        desc.textContent = original;
+      }
+    };
+
+    // Popup size settles over a couple frames
+    requestAnimationFrame(() => {
+      syncVisibility();
+      requestAnimationFrame(syncVisibility);
+    });
+
+    if (wired) return;
+    searchWrap.dataset.wired = "1";
+
+    input.addEventListener("input", () => {
+      const q = input.value.trim();
+      if (!q) {
+        desc.textContent = original;
+        return;
+      }
+      desc.innerHTML = highlightNotesText(original, q);
+      const first = desc.querySelector("mark");
+      if (first) {
+        const markRect = first.getBoundingClientRect();
+        const scrollRect = scroll.getBoundingClientRect();
+        const nextTop =
+          scroll.scrollTop +
+          (markRect.top - scrollRect.top) -
+          scroll.clientHeight / 3;
+        scroll.scrollTo({ top: Math.max(0, nextTop), behavior: "smooth" });
+      }
+    });
+
+    input.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+    });
+  }
+
   function bindPlacePopup(marker, place) {
     const notesOnly = isIndexNotesPin(place);
     marker.bindPopup(() => popupHtml(place), {
@@ -460,7 +541,9 @@
     marker.on("popupopen", (e) => {
       const node = e.popup.getElement();
       const root = node?.querySelector(".rg-popup");
-      if (!root || root.getAttribute("data-notes-only") === "1") return;
+      if (!root) return;
+      setupNotesSearch(root);
+      if (root.getAttribute("data-notes-only") === "1") return;
       fillAddress(root);
     });
   }
