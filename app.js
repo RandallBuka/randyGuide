@@ -1497,16 +1497,30 @@
     list.appendChild(li);
   }
 
-  function appendGuidePinResult(list, place, { onPick }) {
+  function appendGuidePinResult(list, place, { onPick, showIcon = false } = {}) {
     const labels = guidePinLabels(place);
+    const meta = iconMeta(place.icon);
     const li = document.createElement("li");
     li.setAttribute("role", "option");
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.innerHTML = `<span class="result-title">${escapeHtml(labels.title)}</span>
+    if (showIcon) btn.className = "result-with-icon";
+
+    let iconHtml = "";
+    if (showIcon) {
+      const color = ICON_COLORS[place.icon] || "#607D8B";
+      const tintClass = meta?.tint ? " tint" : "";
+      if (meta?.iconUrl) {
+        iconHtml = `<span class="result-pin${tintClass}" style="--pin-bg:${color}" aria-hidden="true"><img src="${escapeHtml(url(meta.iconUrl))}" alt="" width="22" height="22" /></span>`;
+      } else {
+        iconHtml = `<span class="result-pin-dot" style="background:${color}" aria-hidden="true"></span>`;
+      }
+    }
+
+    btn.innerHTML = `${iconHtml}<span class="result-copy"><span class="result-title">${escapeHtml(labels.title)}</span>
       <span class="result-sub">${escapeHtml(
         labels.subtitle || "Guide pin"
-      )}</span>`;
+      )}</span></span>`;
     btn.addEventListener("click", () => onPick(place));
     li.appendChild(btn);
     list.appendChild(li);
@@ -1572,6 +1586,7 @@
       appendResultGroup(list, "Your pins");
       for (const place of pins) {
         appendGuidePinResult(list, place, {
+          showIcon: true,
           onPick: (p) => {
             clearPlaceSearchMarker();
             focusGuidePin(p, { fromInput: els.placeSearch });

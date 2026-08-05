@@ -555,6 +555,53 @@ body {
   text-transform: uppercase;
 }
 
+.map-search-results button.result-with-icon {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.map-search-results .result-copy {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.map-search-results .result-pin {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--pin-bg, #607d8b) 18%, #ffffff);
+  flex-shrink: 0;
+}
+
+.map-search-results .result-pin img {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  display: block;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.2));
+}
+
+.map-search-results .result-pin.tint img {
+  filter:
+    brightness(0) saturate(100%) invert(28%) sepia(84%) saturate(1800%)
+      hue-rotate(340deg) brightness(0.95)
+      drop-shadow(0 1px 1px rgba(0, 0, 0, 0.2));
+}
+
+.map-search-results .result-pin-dot {
+  width: 0.85rem;
+  height: 0.85rem;
+  margin: 0.55rem;
+  border-radius: 50%;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+
 .map-search-results .result-empty,
 .map-search-results .result-status {
   padding: 0.75rem 0.9rem;
