@@ -234,6 +234,145 @@
     return (place.d || "").trim();
   }
 
+  function looksLikeNotesList(inner) {
+    const t = String(inner || "").trim();
+    if (!t) return false;
+    if (/^[+\-–—•]/.test(t)) return true;
+    if (t.includes(",")) return true;
+    return false;
+  }
+
+  function splitNotesTopLevel(text) {
+    const items = [];
+    let cur = "";
+    let depth = 0;
+    let brackets = 0;
+    const src = String(text || "");
+    for (let i = 0; i < src.length; i += 1) {
+      const ch = src[i];
+      if (ch === "[") brackets += 1;
+      else if (ch === "]") brackets = Math.max(0, brackets - 1);
+      else if (ch === "(") depth += 1;
+      else if (ch === ")") depth = Math.max(0, depth - 1);
+
+      if (depth === 0 && brackets === 0 && (ch === "," || ch === "|" || ch === "\n")) {
+        if (cur.trim()) items.push(cur.trim());
+        cur = "";
+        continue;
+      }
+      cur += ch;
+    }
+    if (cur.trim()) items.push(cur.trim());
+    return items;
+  }
+
+  function parseNotesItem(raw) {
+    let str = String(raw || "").trim();
+    if (!str) return null;
+
+    let status = null;
+    const statusMatch = str.match(/^([+\-–—•])\s*/);
+    if (statusMatch) {
+      const mark = statusMatch[1];
+      status = mark === "+" ? "plus" : mark === "•" ? "dot" : "minus";
+      str = str.slice(statusMatch[0].length).trim();
+    }
+
+    const parenGroups = [];
+    let depth = 0;
+    let start = -1;
+    for (let i = 0; i < str.length; i += 1) {
+      const ch = str[i];
+      if (ch === "(") {
+        if (depth === 0) start = i;
+        depth += 1;
+      } else if (ch === ")") {
+        depth -= 1;
+        if (depth === 0 && start >= 0) {
+          parenGroups.push({
+            start,
+            end: i,
+            inner: str.slice(start + 1, i),
+          });
+          start = -1;
+        }
+      }
+    }
+
+    const listGroups = parenGroups.filter((g) => looksLikeNotesList(g.inner));
+    let label = str;
+    const children = [];
+
+    if (listGroups.length) {
+      label = str.slice(0, listGroups[0].start).trim();
+      const after = str.slice(listGroups[listGroups.length - 1].end + 1).trim();
+      for (const group of listGroups) {
+        for (const child of parseNotesList(group.inner)) children.push(child);
+      }
+      if (after) label = `${label} ${after}`.trim();
+    }
+
+    if (!label && !children.length) return null;
+    return { status, label: label || "Untitled", children };
+  }
+
+  function parseNotesList(text) {
+    return splitNotesTopLevel(text)
+      .map(parseNotesItem)
+      .filter(Boolean);
+  }
+
+  function formatNotesLabel(label, query = "") {
+    let out = "";
+    const re = /\[(.*?)\]/g;
+    let last = 0;
+    let match;
+    while ((match = re.exec(label))) {
+      out += highlightNotesText(label.slice(last, match.index), query);
+      out += `<span class="notes-annote">[${highlightNotesText(match[1], query)}]</span>`;
+      last = match.index + match[0].length;
+    }
+    out += highlightNotesText(label.slice(last), query);
+    return out;
+  }
+
+  function renderNotesTree(items, depth = 0, query = "") {
+    if (!items.length) return "";
+    const listClass = depth === 0 ? "notes-list" : "notes-list nested";
+    let html = `<ul class="${listClass}">`;
+    for (const item of items) {
+      const statusClass = item.status ? ` status-${item.status}` : "";
+      const labelClass =
+        depth === 0 ? "notes-label outer" : "notes-label inner";
+      html += `<li class="notes-item${statusClass}">`;
+      html += `<span class="${labelClass}">${formatNotesLabel(item.label, query)}</span>`;
+      if (item.children.length) {
+        html += renderNotesTree(item.children, depth + 1, query);
+      }
+      html += `</li>`;
+    }
+    html += `</ul>`;
+    return html;
+  }
+
+  function formatNotesHtml(notes, query = "") {
+    const items = parseNotesList(notes);
+    if (!items.length) {
+      return `<p class="desc notes-plain">${highlightNotesText(notes, query)}</p>`;
+    }
+    // Single plain line with no list markers / nesting — keep compact
+    if (
+      items.length === 1 &&
+      !items[0].children.length &&
+      !items[0].status &&
+      !notes.includes(",") &&
+      !notes.includes("(")
+    ) {
+      return `<p class="desc notes-plain">${formatNotesLabel(items[0].label, query)}</p>`;
+    }
+    return `<div class="desc notes-formatted">${renderNotesTree(items, 0, query)}</div>`;
+  }
+
   // A–Z US food/drink index markers laid out across the plains (long Notes lists)
   function isIndexNotesPin(place) {
     const name = (place.n || "").trim();
@@ -264,7 +403,7 @@
     const notesOnly = isIndexNotesPin(place);
 
     const notesBlock = notes
-      ? `<section class="rg-block notes${notesOnly ? " notes-expanded" : ""}">
+      ? `<section class="rg-block notes${notesOnly ? " notes-expanded" : ""}" data-raw-notes="${encodeURIComponent(notes)}">
            <h4 class="block-label">Notes</h4>
            <div class="notes-search" hidden>
              <input
@@ -277,7 +416,7 @@
              />
            </div>
            <div class="desc-scroll">
-             <p class="desc">${escapeHtml(notes)}</p>
+             ${formatNotesHtml(notes)}
            </div>
          </section>`
       : "";
@@ -478,21 +617,33 @@
   }
 
   function setupNotesSearch(root) {
+    const section = root.querySelector(".rg-block.notes");
     const scroll = root.querySelector(".desc-scroll");
-    const desc = root.querySelector(".desc");
     const searchWrap = root.querySelector(".notes-search");
     const input = root.querySelector(".js-notes-search");
-    if (!scroll || !desc || !searchWrap || !input) return;
+    if (!section || !scroll || !searchWrap || !input) return;
 
-    const original = desc.textContent || "";
-    let wired = searchWrap.dataset.wired === "1";
+    let original = scroll.textContent || "";
+    const encoded = section.getAttribute("data-raw-notes");
+    if (encoded) {
+      try {
+        original = decodeURIComponent(encoded);
+      } catch {
+        // keep textContent fallback
+      }
+    }
+    const wired = searchWrap.dataset.wired === "1";
+
+    const renderNotes = (query = "") => {
+      scroll.innerHTML = formatNotesHtml(original, query);
+    };
 
     const syncVisibility = () => {
       const needsScroll = scroll.scrollHeight > scroll.clientHeight + 1;
       searchWrap.hidden = !needsScroll;
       if (!needsScroll && input.value) {
         input.value = "";
-        desc.textContent = original;
+        renderNotes("");
       }
     };
 
@@ -507,12 +658,8 @@
 
     input.addEventListener("input", () => {
       const q = input.value.trim();
-      if (!q) {
-        desc.textContent = original;
-        return;
-      }
-      desc.innerHTML = highlightNotesText(original, q);
-      const first = desc.querySelector("mark");
+      renderNotes(q);
+      const first = scroll.querySelector("mark");
       if (first) {
         const markRect = first.getBoundingClientRect();
         const scrollRect = scroll.getBoundingClientRect();
