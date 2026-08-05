@@ -57,6 +57,7 @@
     iconFilters: document.getElementById("icon-filters"),
     layerFilters: document.getElementById("layer-filters"),
     search: document.getElementById("search"),
+    guideSearchResults: document.getElementById("guide-search-results"),
     placeSearch: document.getElementById("place-search"),
     placeSearchClear: document.getElementById("place-search-clear"),
     placeSearchResults: document.getElementById("place-search-results"),
@@ -1180,15 +1181,7 @@
       });
     });
 
-    let searchTimer = null;
-    els.search.addEventListener("input", () => {
-      clearTimeout(searchTimer);
-      searchTimer = setTimeout(() => {
-        state.query = els.search.value;
-        scheduleRender();
-      }, 120);
-    });
-
+    wireGuideSearch();
     wirePlaceSearch();
     wireSidebar();
 
@@ -1267,6 +1260,122 @@
     return { title, subtitle };
   }
 
+  function haversineKm(lat1, lng1, lat2, lng2) {
+    const toRad = (d) => (d * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+    return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  function guidePinLabels(place) {
+    const heading = (place.n || "").trim() || "Untitled";
+    const venue = (venueSubtitle(place) || "").trim();
+    const layer = layerMeta(place.layer)?.label || place.layer || "";
+    const title = venue || heading;
+    const subtitle = venue
+      ? `${heading}${layer ? ` · ${layer}` : ""}`
+      : layer || "";
+    return { title, subtitle, heading, venue };
+  }
+
+  function searchGuidePins(query, { limit = 8, nearView = true } = {}) {
+    const q = query.trim().toLowerCase();
+    if (q.length < 2 || !state.places?.length) return [];
+
+    const center = state.map?.getCenter?.();
+    const bounds = state.map?.getBounds?.();
+    const scored = [];
+
+    for (const place of state.places) {
+      if (!Number.isFinite(place.lat) || !Number.isFinite(place.lng)) continue;
+      const name = (place.n || "").toLowerCase();
+      const notes = (place.d || "").toLowerCase();
+      const venue = (venueSubtitle(place) || "").toLowerCase();
+      const layer = String(place.layer || "").toLowerCase();
+      if (
+        !name.includes(q) &&
+        !venue.includes(q) &&
+        !notes.includes(q) &&
+        !layer.includes(q)
+      ) {
+        continue;
+      }
+
+      let score = 0;
+      if (name === q || venue === q) score += 120;
+      else if (name.startsWith(q) || venue.startsWith(q)) score += 90;
+      else if (name.includes(q)) score += 70;
+      else if (venue.includes(q)) score += 60;
+      else if (notes.includes(q)) score += 35;
+      else if (layer.includes(q)) score += 20;
+
+      let dist = Infinity;
+      if (nearView && center) {
+        dist = haversineKm(center.lat, center.lng, place.lat, place.lng);
+        if (bounds?.contains([place.lat, place.lng])) score += 45;
+        score += 40 / (1 + dist / 35);
+      }
+
+      scored.push({ place, score, dist });
+    }
+
+    scored.sort(
+      (a, b) => b.score - a.score || (a.dist || 0) - (b.dist || 0)
+    );
+    return scored.slice(0, limit).map((s) => s.place);
+  }
+
+  async function focusGuidePin(place, { fromInput = null } = {}) {
+    if (!state.map || !place) return;
+    hidePlaceResults();
+    hideGuideSearchResults();
+    setSidebarOpen(false);
+
+    // Make sure filters aren't hiding the selected pin
+    let filtersChanged = false;
+    if (!state.activeIcons.has(place.icon)) {
+      state.activeIcons.add(place.icon);
+      filtersChanged = true;
+    }
+    if (!state.activeLayers.has(place.layer)) {
+      state.activeLayers.add(place.layer);
+      filtersChanged = true;
+    }
+    if (filtersChanged && state.data) {
+      renderFilterList(els.iconFilters, state.data.icons, "icon");
+      renderFilterList(els.layerFilters, state.data.layers, "layer");
+    }
+
+    const labels = guidePinLabels(place);
+    if (fromInput) fromInput.value = labels.title;
+
+    const targetZoom = Math.max(state.map.getZoom(), 15);
+    state.mapMoving = false;
+    state.map.setView([place.lat, place.lng], targetZoom, { animate: false });
+    await renderVisibleMarkers();
+
+    let marker = state.markersByKey.get(placeKey(place));
+    if (!marker && state.layer) {
+      const icon = await getLeafletIcon(place.icon);
+      marker = L.marker([place.lat, place.lng], {
+        icon,
+        keyboard: false,
+        riseOnHover: true,
+        zIndexOffset: 1500,
+      });
+      bindPlacePopup(marker, place);
+      state.layer.addLayer(marker);
+      state.markersByKey.set(placeKey(place), marker);
+    }
+    marker?.openPopup();
+    if (els.placeSearchClear) {
+      els.placeSearchClear.hidden = !(els.placeSearch?.value || state.searchMarker);
+    }
+  }
+
   async function searchWorldPlaces(query) {
     const q = query.trim();
     if (q.length < 2) return [];
@@ -1316,6 +1425,12 @@
     if (!els.placeSearchResults) return;
     els.placeSearchResults.hidden = true;
     els.placeSearchResults.innerHTML = "";
+  }
+
+  function hideGuideSearchResults() {
+    if (!els.guideSearchResults) return;
+    els.guideSearchResults.hidden = true;
+    els.guideSearchResults.innerHTML = "";
   }
 
   function clearPlaceSearchMarker() {
@@ -1375,8 +1490,30 @@
     if (els.placeSearchClear) els.placeSearchClear.hidden = false;
   }
 
-  function renderPlaceResults(results, { status = "" } = {}) {
-    const list = els.placeSearchResults;
+  function appendResultGroup(list, label) {
+    const li = document.createElement("li");
+    li.className = "result-group";
+    li.textContent = label;
+    list.appendChild(li);
+  }
+
+  function appendGuidePinResult(list, place, { onPick }) {
+    const labels = guidePinLabels(place);
+    const li = document.createElement("li");
+    li.setAttribute("role", "option");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.innerHTML = `<span class="result-title">${escapeHtml(labels.title)}</span>
+      <span class="result-sub">${escapeHtml(
+        labels.subtitle || "Guide pin"
+      )}</span>`;
+    btn.addEventListener("click", () => onPick(place));
+    li.appendChild(btn);
+    list.appendChild(li);
+  }
+
+  function renderGuideSearchResults(pins, { status = "" } = {}) {
+    const list = els.guideSearchResults;
     if (!list) return;
     list.innerHTML = "";
 
@@ -1389,7 +1526,40 @@
       return;
     }
 
-    if (!results.length) {
+    if (!pins.length) {
+      const li = document.createElement("li");
+      li.className = "result-empty";
+      li.textContent = "No matching pins";
+      list.appendChild(li);
+      list.hidden = false;
+      return;
+    }
+
+    for (const place of pins) {
+      appendGuidePinResult(list, place, {
+        onPick: (p) => {
+          focusGuidePin(p, { fromInput: els.search });
+        },
+      });
+    }
+    list.hidden = false;
+  }
+
+  function renderPlaceResults({ pins = [], world = [], status = "" } = {}) {
+    const list = els.placeSearchResults;
+    if (!list) return;
+    list.innerHTML = "";
+
+    if (status && !pins.length && !world.length) {
+      const li = document.createElement("li");
+      li.className = "result-status";
+      li.textContent = status;
+      list.appendChild(li);
+      list.hidden = false;
+      return;
+    }
+
+    if (!pins.length && !world.length) {
       const li = document.createElement("li");
       li.className = "result-empty";
       li.textContent = "No places found";
@@ -1398,24 +1568,87 @@
       return;
     }
 
-    for (const place of results) {
-      const li = document.createElement("li");
-      li.setAttribute("role", "option");
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.innerHTML = `<span class="result-title">${escapeHtml(place.title)}</span>${
-        place.subtitle
-          ? `<span class="result-sub">${escapeHtml(place.subtitle)}</span>`
-          : ""
-      }`;
-      btn.addEventListener("click", () => {
-        if (els.placeSearch) els.placeSearch.value = place.title;
-        showPlaceOnMap(place);
-      });
-      li.appendChild(btn);
-      list.appendChild(li);
+    if (pins.length) {
+      appendResultGroup(list, "Your pins");
+      for (const place of pins) {
+        appendGuidePinResult(list, place, {
+          onPick: (p) => {
+            clearPlaceSearchMarker();
+            focusGuidePin(p, { fromInput: els.placeSearch });
+            if (els.placeSearchClear) els.placeSearchClear.hidden = false;
+          },
+        });
+      }
     }
+
+    if (world.length) {
+      appendResultGroup(list, "Other places");
+      for (const place of world) {
+        const li = document.createElement("li");
+        li.setAttribute("role", "option");
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.innerHTML = `<span class="result-title">${escapeHtml(place.title)}</span>${
+          place.subtitle
+            ? `<span class="result-sub">${escapeHtml(place.subtitle)}</span>`
+            : ""
+        }`;
+        btn.addEventListener("click", () => {
+          if (els.placeSearch) els.placeSearch.value = place.title;
+          showPlaceOnMap(place);
+        });
+        li.appendChild(btn);
+        list.appendChild(li);
+      }
+    }
+
     list.hidden = false;
+  }
+
+  function wireGuideSearch() {
+    if (!els.search || !els.guideSearchResults) return;
+
+    let timer = null;
+
+    const runSearch = () => {
+      const q = els.search.value.trim();
+      state.query = els.search.value;
+      scheduleRender();
+      if (q.length < 2) {
+        hideGuideSearchResults();
+        return;
+      }
+      const pins = searchGuidePins(q, { limit: 8, nearView: true });
+      renderGuideSearchResults(pins);
+    };
+
+    els.search.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = setTimeout(runSearch, 120);
+    });
+
+    els.search.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        hideGuideSearchResults();
+        els.search.blur();
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const first = els.guideSearchResults?.querySelector("button");
+        if (first) first.click();
+      }
+    });
+
+    els.search.addEventListener("focus", () => {
+      if (els.guideSearchResults?.children.length) {
+        els.guideSearchResults.hidden = false;
+      }
+    });
+
+    document.addEventListener("click", (e) => {
+      const wrap = els.search?.closest(".search-wrap");
+      if (wrap && !wrap.contains(e.target)) hideGuideSearchResults();
+    });
   }
 
   function wirePlaceSearch() {
@@ -1432,15 +1665,20 @@
         return;
       }
       const mySeq = ++seq;
-      renderPlaceResults([], { status: "Searching…" });
-      const results = await searchWorldPlaces(q);
+      const pins = searchGuidePins(q, { limit: 3, nearView: true });
+      renderPlaceResults({
+        pins,
+        world: [],
+        status: pins.length ? "" : "Searching…",
+      });
+      const world = await searchWorldPlaces(q);
       if (mySeq !== seq) return;
-      renderPlaceResults(results);
+      renderPlaceResults({ pins, world });
     };
 
     els.placeSearch.addEventListener("input", () => {
       clearTimeout(timer);
-      timer = setTimeout(runSearch, 280);
+      timer = setTimeout(runSearch, 200);
     });
 
     els.placeSearch.addEventListener("keydown", (e) => {

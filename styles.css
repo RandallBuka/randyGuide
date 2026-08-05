@@ -113,6 +113,10 @@ body {
   line-height: 1.45;
 }
 
+.search-wrap {
+  position: relative;
+}
+
 .search-wrap input {
   width: 100%;
   border: 1px solid var(--line);
@@ -129,6 +133,67 @@ body {
 .search-wrap input:focus {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
   box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.guide-search-results {
+  list-style: none;
+  margin: 0.35rem 0 0;
+  padding: 0.35rem 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: var(--shadow);
+  max-height: min(40vh, 280px);
+  overflow: auto;
+  z-index: 5;
+}
+
+.guide-search-results[hidden] {
+  display: none !important;
+}
+
+.guide-search-results li {
+  margin: 0;
+}
+
+.guide-search-results button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 0.65rem 0.9rem;
+  cursor: pointer;
+  display: grid;
+  gap: 0.15rem;
+}
+
+.guide-search-results button:hover,
+.guide-search-results button:focus-visible {
+  background: var(--accent-soft);
+  outline: none;
+}
+
+.guide-search-results .result-title,
+.map-search-results .result-title {
+  font-weight: 650;
+  font-size: 0.92rem;
+  line-height: 1.25;
+}
+
+.guide-search-results .result-sub,
+.map-search-results .result-sub {
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  line-height: 1.3;
+}
+
+.guide-search-results .result-empty,
+.guide-search-results .result-status {
+  padding: 0.75rem 0.9rem;
+  color: var(--ink-soft);
+  font-size: 0.85rem;
 }
 
 .filter-section {
@@ -480,16 +545,14 @@ body {
   outline: none;
 }
 
-.map-search-results .result-title {
-  font-weight: 650;
-  font-size: 0.92rem;
-  line-height: 1.25;
-}
-
-.map-search-results .result-sub {
+.map-search-results .result-group,
+.guide-search-results .result-group {
+  padding: 0.45rem 0.9rem 0.2rem;
   color: var(--ink-soft);
-  font-size: 0.78rem;
-  line-height: 1.3;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .map-search-results .result-empty,

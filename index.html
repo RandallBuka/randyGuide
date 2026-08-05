@@ -32,7 +32,7 @@
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
       crossorigin=""
     />
-    <link rel="stylesheet" href="styles.css?v=27" />
+    <link rel="stylesheet" href="styles.css?v=28" />
   </head>
   <body>
     <div class="app">
@@ -60,13 +60,21 @@
         </header>
 
         <div class="search-wrap">
-          <label class="sr-only" for="search">Search places</label>
+          <label class="sr-only" for="search">Search guide pins</label>
           <input
             id="search"
             type="search"
-            placeholder="Filter guide pins…"
+            placeholder="Search guide pins…"
             autocomplete="off"
+            enterkeyhint="search"
           />
+          <ul
+            id="guide-search-results"
+            class="guide-search-results"
+            hidden
+            role="listbox"
+            aria-label="Guide pin search results"
+          ></ul>
         </div>
 
         <section class="filter-section">
@@ -133,7 +141,7 @@
             <input
               id="place-search"
               type="search"
-              placeholder="Search any place…"
+              placeholder="Search pins or any place…"
               autocomplete="off"
               enterkeyhint="search"
             />
@@ -186,7 +194,7 @@
       crossorigin=""
     ></script>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-    <script src="kml-client.js?v=27"></script>
-    <script src="app.js?v=27"></script>
+    <script src="kml-client.js?v=28"></script>
+    <script src="app.js?v=28"></script>
   </body>
 </html>
