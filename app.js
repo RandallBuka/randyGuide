@@ -374,11 +374,40 @@
     return `<div class="desc notes-formatted">${renderNotesTree(items, 0, query)}</div>`;
   }
 
-  // A–Z US food/drink index markers laid out across the plains (long Notes lists)
-  function isIndexNotesPin(place) {
+  function countTopLevelNotesItems(text) {
+    return splitNotesTopLevel(text).filter((s) => s.trim()).length;
+  }
+
+  function looksLikeVenueWriteup(notes) {
+    const d = notes || "";
+    if (/\["[^"]{40,}"\]/.test(d)) return true;
+    if (
+      /\[(?:DDD|No Reservations|Cook'?s Tour|The Layover|Parts Unknown|Michelin|Uncharted|Last Meals|Bib Gourmand)/i.test(
+        d
+      )
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  // Pins that are catalogs / regions (not a single addressable venue).
+  // Kept intentionally strict — country names like "France" are reused by
+  // thousands of specific venues, so those are NOT auto-detected.
+  function isNotesOnlyPin(place) {
     const name = (place.n || "").trim();
+    const notes = (place.d || "").trim();
+
+    // US A/B1/E-F food indexes across the plains
     if (/^United States \(([A-Z]\d*|[A-Z]-[A-Z])\)$/.test(name)) return true;
-    // Trailing Coffee / Drinks markers at the end of that same row
+
+    // Nested state indexes, e.g. United States (Ohio) (A-M)
+    if (/^United States \([^)]+\) \([A-Z](?:-[A-Z])?\)$/.test(name)) return true;
+
+    // Letter-range indexes, e.g. Italy (A-H), Italy (I-P), Italy (Q-Z)
+    if (/^.+ \([A-Z]-[A-Z]\)$/.test(name)) return true;
+
+    // Trailing Coffee / Drinks markers at the end of the US index row
     if (
       name === "United States" &&
       place.lat > 39.74 &&
@@ -388,6 +417,21 @@
     ) {
       return true;
     }
+
+    // Italy (Tuscany) / Italy (Lazio) style regional food lists — only when
+    // Notes are clearly a multi-item catalog, not a short venue note.
+    const italyRegion = name.match(/^Italy \((.+)\)$/i);
+    if (italyRegion) {
+      const sub = italyRegion[1];
+      if (/^[A-Z](?:-[A-Z])?$/.test(sub)) return true; // A-H already covered
+      if (
+        countTopLevelNotesItems(notes) >= 4 &&
+        !looksLikeVenueWriteup(notes)
+      ) {
+        return true;
+      }
+    }
+
     return false;
   }
 
@@ -401,7 +445,7 @@
     const heading = (place.n || "").trim() || "Untitled";
     const venue = venueSubtitle(place);
     const notes = notesText(place);
-    const notesOnly = isIndexNotesPin(place);
+    const notesOnly = isNotesOnlyPin(place);
 
     const notesBlock = notes
       ? `<section class="rg-block notes${notesOnly ? " notes-expanded" : ""}" data-raw-notes="${encodeURIComponent(notes)}">
@@ -678,7 +722,7 @@
   }
 
   function bindPlacePopup(marker, place) {
-    const notesOnly = isIndexNotesPin(place);
+    const notesOnly = isNotesOnlyPin(place);
     marker.bindPopup(() => popupHtml(place), {
       maxWidth: notesOnly ? 340 : 300,
       autoPan: true,
